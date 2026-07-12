@@ -1,0 +1,30 @@
+{
+  "generator": "xtask crate-catalog v1",
+  "package_count": 2,
+  "packages": [
+    {
+      "description": "Yearly ledger records and exact amount helpers.",
+      "generated_readme": false,
+      "manifest": "crates/sim-ledger/Cargo.toml",
+      "name": "sim-ledger",
+      "publish": "false",
+      "readme": "crates/sim-ledger/README.md",
+      "root": "crates/sim-ledger",
+      "target_kinds": [
+        "lib"
+      ]
+    },
+    {
+      "description": "SIM workspace package for xtask.",
+      "generated_readme": true,
+      "manifest": "xtask/Cargo.toml",
+      "name": "xtask",
+      "publish": "false",
+      "readme": "xtask/README.md",
+      "root": "xtask",
+      "target_kinds": [
+        "bin"
+      ]
+    }
+  ]
+}
