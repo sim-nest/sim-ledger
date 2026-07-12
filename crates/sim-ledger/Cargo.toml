@@ -1,0 +1,15 @@
+[package]
+name = "sim-ledger"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+description = "Yearly ledger records and exact amount helpers."
+readme = "README.md"
+publish = false
+repository = "https://github.com/sim-nest/sim-ledger"
+homepage = "https://github.com/sim-nest/sim-ledger"
+
+[dependencies]
+
+[lints]
+workspace = true
