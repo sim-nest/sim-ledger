@@ -1,7 +1,19 @@
 {
   "generator": "xtask crate-catalog v1",
-  "package_count": 2,
+  "package_count": 3,
   "packages": [
+    {
+      "description": "LibreOffice Base ODB helpers for sim-ledger imports.",
+      "generated_readme": false,
+      "manifest": "crates/sim-ledger-odb/Cargo.toml",
+      "name": "sim-ledger-odb",
+      "publish": "false",
+      "readme": "crates/sim-ledger-odb/README.md",
+      "root": "crates/sim-ledger-odb",
+      "target_kinds": [
+        "lib"
+      ]
+    },
     {
       "description": "Yearly ledger records and exact amount helpers.",
       "generated_readme": false,

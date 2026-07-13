@@ -12,7 +12,8 @@ hundredths so equality and sums stay exact.
 
 | Crate | Role |
 | --- | --- |
-| `sim-ledger` | Ledger records, fixed-decimal amount parsing/formatting, and double-entry balance checks. |
+| `sim-ledger` | Ledger records, fixed-decimal amount parsing/formatting, storage, import, and reports. |
+| `sim-ledger-odb` | HSQLDB script and CSV helpers for turning LibreOffice Base ledger exports into `sim-ledger` source years. |
 
 ## Documentation
 
