@@ -1,7 +1,20 @@
 {
   "generator": "xtask crate-catalog v1",
-  "package_count": 3,
+  "package_count": 4,
   "packages": [
+    {
+      "description": "Command line imports and reports for sim-ledger sets.",
+      "generated_readme": false,
+      "manifest": "crates/sim-ledger-cli/Cargo.toml",
+      "name": "sim-ledger-cli",
+      "publish": "false",
+      "readme": "crates/sim-ledger-cli/README.md",
+      "root": "crates/sim-ledger-cli",
+      "target_kinds": [
+        "bin",
+        "lib"
+      ]
+    },
     {
       "description": "LibreOffice Base ODB helpers for sim-ledger imports.",
       "generated_readme": false,

@@ -13,6 +13,7 @@ hundredths so equality and sums stay exact.
 | Crate | Role |
 | --- | --- |
 | `sim-ledger` | Ledger records, fixed-decimal amount parsing/formatting, storage, import, and reports. |
+| `sim-ledger-cli` | Command line set creation, imports, year listing, and balance reports. |
 | `sim-ledger-odb` | HSQLDB script and CSV helpers for turning LibreOffice Base ledger exports into `sim-ledger` source years. |
 
 ## Documentation
