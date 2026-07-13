@@ -8,7 +8,11 @@
 #![deny(missing_docs)]
 
 pub mod model;
+pub mod report;
+pub mod set;
 pub mod store;
 
 pub use model::{Account, Amount, Posting, Voucher, YearData, is_balanced};
+pub use report::{BalanceKey, BalanceRow, balances};
+pub use set::{LedgerSet, SetManifest};
 pub use store::YearStore;
