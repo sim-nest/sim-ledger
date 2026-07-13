@@ -9,6 +9,8 @@ pub struct OdbSchema {
     pub columns: HashMap<String, Vec<(String, ColType)>>,
     /// Next id by table name.
     pub restart: HashMap<String, i64>,
+    /// Index root offsets by table name.
+    pub index_roots: HashMap<String, Vec<i64>>,
 }
 
 /// HSQLDB column types used by the ledger tables.
@@ -24,7 +26,7 @@ pub enum ColType {
     Numeric,
 }
 
-/// Parse HSQLDB table layouts and `RESTART WITH` id counters.
+/// Parse HSQLDB table layouts, index roots, and `RESTART WITH` id counters.
 #[must_use]
 pub fn parse_script(script: &str) -> OdbSchema {
     let mut schema = OdbSchema::default();
@@ -38,6 +40,9 @@ pub fn parse_script(script: &str) -> OdbSchema {
         }
         if let Some((table, next)) = parse_restart(line) {
             schema.restart.insert(table, next);
+        }
+        if let Some((table, roots)) = parse_index_roots(line) {
+            schema.index_roots.insert(table, roots);
         }
     }
     schema
@@ -91,6 +96,23 @@ fn parse_restart(line: &str) -> Option<(String, i64)> {
     Some((table, next))
 }
 
+fn parse_index_roots(line: &str) -> Option<(String, Vec<i64>)> {
+    let upper = line.to_ascii_uppercase();
+    if !upper.starts_with("SET TABLE ") {
+        return None;
+    }
+    let (table, rest) = parse_quoted(line["SET TABLE ".len()..].trim_start())?;
+    let index_pos = rest.to_ascii_uppercase().find(" INDEX'")? + " INDEX'".len();
+    let roots_text = &rest[index_pos..];
+    let end = roots_text.find('\'')?;
+    let roots = roots_text[..end]
+        .split_whitespace()
+        .map(str::parse)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    Some((table, roots))
+}
+
 fn parse_quoted(input: &str) -> Option<(String, &str)> {
     let input = input.strip_prefix('"')?;
     let end = input.find('"')?;
@@ -129,6 +151,7 @@ CREATE CACHED TABLE "ver"("v_nr" INTEGER NOT NULL PRIMARY KEY,"v_datum" DATE NOT
 CREATE CACHED TABLE "trans"("t_nr" INTEGER NOT NULL PRIMARY KEY,"t_ver" INTEGER NOT NULL,"t_konto" INTEGER NOT NULL,"t_belopp" NUMERIC(50,2) NOT NULL,"t_text" VARCHAR(200))
 ALTER TABLE "ver" ALTER COLUMN "v_nr" RESTART WITH 11612
 ALTER TABLE "trans" ALTER COLUMN "t_nr" RESTART WITH 25471
+SET TABLE "trans" INDEX'134576 94648 47888 25471'
 "#,
         );
 
@@ -143,6 +166,10 @@ ALTER TABLE "trans" ALTER COLUMN "t_nr" RESTART WITH 25471
                 ("k_sru_p".to_owned(), ColType::Integer),
                 ("k_sru_m".to_owned(), ColType::Integer),
             ]
+        );
+        assert_eq!(
+            schema.index_roots["trans"],
+            vec![134_576, 94_648, 47_888, 25_471]
         );
     }
 }

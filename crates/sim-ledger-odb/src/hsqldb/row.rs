@@ -45,10 +45,13 @@ enum HsqlErrorKind {
     UnsupportedNumericScale(i32),
     InvalidBigInteger,
     NumericOverflow,
+    InvalidRowOffset(i64),
+    InvalidRowSize(i32),
+    RowCycle(i64),
 }
 
 impl HsqlError {
-    fn unexpected_eof(pos: usize, needed: usize, len: usize) -> HsqlError {
+    pub(crate) fn unexpected_eof(pos: usize, needed: usize, len: usize) -> HsqlError {
         HsqlError {
             kind: HsqlErrorKind::UnexpectedEof { pos, needed, len },
         }
@@ -84,9 +87,27 @@ impl HsqlError {
         }
     }
 
-    fn numeric_overflow() -> HsqlError {
+    pub(crate) fn numeric_overflow() -> HsqlError {
         HsqlError {
             kind: HsqlErrorKind::NumericOverflow,
+        }
+    }
+
+    pub(crate) fn invalid_row_offset(offset: i64) -> HsqlError {
+        HsqlError {
+            kind: HsqlErrorKind::InvalidRowOffset(offset),
+        }
+    }
+
+    pub(crate) fn invalid_row_size(size: i32) -> HsqlError {
+        HsqlError {
+            kind: HsqlErrorKind::InvalidRowSize(size),
+        }
+    }
+
+    pub(crate) fn row_cycle(offset: i64) -> HsqlError {
+        HsqlError {
+            kind: HsqlErrorKind::RowCycle(offset),
         }
     }
 }
@@ -115,6 +136,18 @@ impl fmt::Display for HsqlError {
             }
             HsqlErrorKind::NumericOverflow => {
                 write!(f, "HSQLDB NUMERIC value does not fit in minor units")
+            }
+            HsqlErrorKind::InvalidRowOffset(offset) => {
+                write!(f, "invalid HSQLDB row offset {offset}")
+            }
+            HsqlErrorKind::InvalidRowSize(size) => {
+                write!(f, "invalid HSQLDB row block size {size}")
+            }
+            HsqlErrorKind::RowCycle(offset) => {
+                write!(
+                    f,
+                    "cycle while following HSQLDB row index at offset {offset}"
+                )
             }
         }
     }
