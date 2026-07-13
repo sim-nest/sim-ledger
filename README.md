@@ -15,6 +15,7 @@ hundredths so equality and sums stay exact.
 | `sim-ledger` | Ledger records, fixed-decimal amount parsing/formatting, storage, import, and reports. |
 | `sim-ledger-cli` | Command line set creation, imports, year listing, and balance reports. |
 | `sim-lib-ledger-books` | Journal draft checks and data-backed bookkeeping profiles. |
+| `sim-lib-ledger-close` | Fiscal-year close, trial balance, statements, and SRU comparison helpers. |
 | `sim-ledger-odb` | HSQLDB script and CSV helpers for turning LibreOffice Base ledger exports into `sim-ledger` source years. |
 
 ## Documentation

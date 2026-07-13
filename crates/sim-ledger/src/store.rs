@@ -4,11 +4,13 @@ use std::fs::OpenOptions;
 use std::path::Path;
 
 use rusqlite::types::Type;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::model::{Account, Amount, Posting, Voucher};
 
 const SCHEMA: &str = include_str!("schema.sql");
+const META_CLOSING_STATE: &str = "closing_state";
+const CLOSING_STATE_CLOSED: &str = "closed";
 
 /// A connection to one per-year SQLite ledger file.
 pub struct YearStore {
@@ -50,6 +52,7 @@ impl YearStore {
 
     /// Insert one year-local account.
     pub fn insert_account(&self, account: &Account) -> rusqlite::Result<()> {
+        self.ensure_mutable()?;
         self.conn.execute(
             "INSERT INTO account(number, name, note, sru_plus, sru_minus) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
@@ -65,6 +68,7 @@ impl YearStore {
 
     /// Insert one voucher.
     pub fn insert_voucher(&self, voucher: &Voucher) -> rusqlite::Result<()> {
+        self.ensure_mutable()?;
         self.conn.execute(
             "INSERT INTO voucher(id, source_id, date, text) VALUES (?1, ?2, ?3, ?4)",
             params![voucher.id, voucher.source_id, voucher.date, voucher.text],
@@ -74,6 +78,7 @@ impl YearStore {
 
     /// Insert one posting line.
     pub fn insert_posting(&self, posting: &Posting) -> rusqlite::Result<()> {
+        self.ensure_mutable()?;
         self.conn.execute(
             "INSERT INTO posting(id, source_id, voucher_id, account, minor, text) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
@@ -108,6 +113,22 @@ impl YearStore {
         Ok(())
     }
 
+    /// Read one self-describing metadata entry.
+    pub fn meta_value(&self, key: &str) -> rusqlite::Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()
+    }
+
+    /// Return whether the year is explicitly closed.
+    pub fn is_closed(&self) -> rusqlite::Result<bool> {
+        Ok(self.meta_value(META_CLOSING_STATE)?.as_deref() == Some(CLOSING_STATE_CLOSED))
+    }
+
     /// Read all vouchers ordered by canonical id.
     pub fn vouchers(&self) -> rusqlite::Result<Vec<Voucher>> {
         let mut stmt = self
@@ -140,6 +161,13 @@ impl YearStore {
             })
         })?;
         rows.collect()
+    }
+
+    fn ensure_mutable(&self) -> rusqlite::Result<()> {
+        if self.is_closed()? {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        Ok(())
     }
 }
 
