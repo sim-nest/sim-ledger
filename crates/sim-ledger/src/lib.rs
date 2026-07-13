@@ -8,5 +8,7 @@
 #![deny(missing_docs)]
 
 pub mod model;
+pub mod store;
 
 pub use model::{Account, Amount, Posting, Voucher, YearData, is_balanced};
+pub use store::YearStore;
