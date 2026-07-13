@@ -213,16 +213,37 @@ fn read_postings(data: &[u8], schema: &OdbSchema) -> Result<Vec<SourcePosting>, 
     let rows = table_rows(data, schema, "trans")?;
     let columns = column_index(schema, "trans")?;
     rows.iter()
-        .map(|row| {
-            Ok(SourcePosting {
-                source_id: int_cell(row, &columns, "trans", "t_nr")?,
-                source_voucher_id: int_cell(row, &columns, "trans", "t_ver")?,
-                account: int_cell(row, &columns, "trans", "t_konto")?,
-                amount: Amount(num_cell(row, &columns, "trans", "t_belopp")?),
-                text: optional_string_cell(row, &columns, "trans", "t_text")?,
-            })
+        .filter_map(|row| match posting_from_row(row, &columns) {
+            Ok(Some(posting)) => Some(Ok(posting)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
         })
         .collect()
+}
+
+fn posting_from_row(
+    row: &[Cell],
+    columns: &HashMap<&str, usize>,
+) -> Result<Option<SourcePosting>, OdbError> {
+    let Some(source_voucher_id) =
+        optional_int_cell_alias(row, columns, "trans", &["t_ver", "v_nr"])?
+    else {
+        return Ok(None);
+    };
+    let Some(account) = optional_int_cell_alias(row, columns, "trans", &["t_konto", "k_nr"])?
+    else {
+        return Ok(None);
+    };
+    let Some(amount) = optional_num_cell(row, columns, "trans", "t_belopp")? else {
+        return Ok(None);
+    };
+    Ok(Some(SourcePosting {
+        source_id: int_cell(row, columns, "trans", "t_nr")?,
+        source_voucher_id,
+        account,
+        amount: Amount(amount),
+        text: optional_string_cell(row, columns, "trans", "t_text")?,
+    }))
 }
 
 fn table_rows(
@@ -273,6 +294,33 @@ fn int_cell(
 ) -> Result<i64, OdbError> {
     match cell(row, columns, table, column)? {
         Cell::Int(value) => Ok(*value),
+        _ => Err(OdbError::WrongCellType { table, column }),
+    }
+}
+
+fn optional_int_cell_alias(
+    row: &[Cell],
+    columns: &HashMap<&str, usize>,
+    table: &'static str,
+    aliases: &[&'static str],
+) -> Result<Option<i64>, OdbError> {
+    let column = aliases
+        .iter()
+        .copied()
+        .find(|column| columns.contains_key(column))
+        .unwrap_or(aliases[0]);
+    optional_int_cell(row, columns, table, column)
+}
+
+fn optional_int_cell(
+    row: &[Cell],
+    columns: &HashMap<&str, usize>,
+    table: &'static str,
+    column: &'static str,
+) -> Result<Option<i64>, OdbError> {
+    match cell(row, columns, table, column)? {
+        Cell::Null => Ok(None),
+        Cell::Int(value) => Ok(Some(*value)),
         _ => Err(OdbError::WrongCellType { table, column }),
     }
 }
@@ -336,14 +384,15 @@ fn date_cell(
     }
 }
 
-fn num_cell(
+fn optional_num_cell(
     row: &[Cell],
     columns: &HashMap<&str, usize>,
     table: &'static str,
     column: &'static str,
-) -> Result<i64, OdbError> {
+) -> Result<Option<i64>, OdbError> {
     match cell(row, columns, table, column)? {
-        Cell::Num(value) => Ok(*value),
+        Cell::Null => Ok(None),
+        Cell::Num(value) => Ok(Some(*value)),
         _ => Err(OdbError::WrongCellType { table, column }),
     }
 }

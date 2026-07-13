@@ -9,7 +9,7 @@ pub struct OdbSchema {
     pub columns: HashMap<String, Vec<(String, ColType)>>,
     /// Next id by table name.
     pub restart: HashMap<String, i64>,
-    /// Index root offsets by table name.
+    /// Real index root offsets by table name.
     pub index_roots: HashMap<String, Vec<i64>>,
 }
 
@@ -105,11 +105,12 @@ fn parse_index_roots(line: &str) -> Option<(String, Vec<i64>)> {
     let index_pos = rest.to_ascii_uppercase().find(" INDEX'")? + " INDEX'".len();
     let roots_text = &rest[index_pos..];
     let end = roots_text.find('\'')?;
-    let roots = roots_text[..end]
+    let mut roots = roots_text[..end]
         .split_whitespace()
         .map(str::parse)
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
+    roots.pop();
     Some((table, roots))
 }
 
@@ -167,9 +168,6 @@ SET TABLE "trans" INDEX'134576 94648 47888 25471'
                 ("k_sru_m".to_owned(), ColType::Integer),
             ]
         );
-        assert_eq!(
-            schema.index_roots["trans"],
-            vec![134_576, 94_648, 47_888, 25_471]
-        );
+        assert_eq!(schema.index_roots["trans"], vec![134_576, 94_648, 47_888]);
     }
 }

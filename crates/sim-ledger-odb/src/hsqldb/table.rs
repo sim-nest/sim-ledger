@@ -48,17 +48,23 @@ fn decode_row(
     let offset = usize::try_from(offset).map_err(|_| HsqlError::invalid_row_offset(offset))?;
     let (size, mut pos) = read_i32(data, offset)?;
     let size = usize::try_from(size).map_err(|_| HsqlError::invalid_row_size(size))?;
-    let end = pos
+    if size < 4 {
+        return Err(HsqlError::invalid_row_size(
+            i32::try_from(size).unwrap_or(i32::MAX),
+        ));
+    }
+    let end = offset
         .checked_add(size)
-        .ok_or_else(|| HsqlError::unexpected_eof(pos, size, data.len()))?;
+        .ok_or_else(|| HsqlError::unexpected_eof(offset, size, data.len()))?;
     if end > data.len() {
-        return Err(HsqlError::unexpected_eof(pos, size, data.len()));
+        return Err(HsqlError::unexpected_eof(offset, size, data.len()));
     }
 
     let mut left = 0_i64;
     let mut right = 0_i64;
     for index in 0..index_count {
-        let (node_left, next) = read_i32(data, pos)?;
+        let (_, next) = read_i32(data, pos)?;
+        let (node_left, next) = read_i32(data, next)?;
         let (node_right, next) = read_i32(data, next)?;
         let (_, next) = read_i32(data, next)?;
         if index == 0 {
@@ -136,7 +142,7 @@ mod tests {
             ],
         );
 
-        let rows = read_table(&data, i64::from(root), &cols, 1).unwrap();
+        let rows = read_table(&data, i64::from(root), &cols, 2).unwrap();
         assert_eq!(
             rows,
             vec![
@@ -155,13 +161,19 @@ mod tests {
     ) -> i32 {
         let offset = i32::try_from(data.len()).unwrap();
         let mut body = Vec::new();
+        body.extend_from_slice(&0_i32.to_be_bytes());
         body.extend_from_slice(&left.to_be_bytes());
         body.extend_from_slice(&right.to_be_bytes());
         body.extend_from_slice(&parent.to_be_bytes());
+        body.extend_from_slice(&0_i32.to_be_bytes());
+        body.extend_from_slice(&0_i32.to_be_bytes());
+        body.extend_from_slice(&0_i32.to_be_bytes());
+        body.extend_from_slice(&0_i32.to_be_bytes());
         for (cell, ty) in cells {
             write_cell(&mut body, cell, *ty);
         }
-        data.extend_from_slice(&i32::try_from(body.len()).unwrap().to_be_bytes());
+        let row_size = i32::try_from(body.len() + 4).unwrap();
+        data.extend_from_slice(&row_size.to_be_bytes());
         data.extend_from_slice(&body);
         offset
     }

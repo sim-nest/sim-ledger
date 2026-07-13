@@ -135,12 +135,24 @@ fn synthetic_data() -> (Vec<u8>, Roots) {
             (Cell::Str("Credit".to_owned()), ColType::Varchar),
         ],
     );
+    let posting_sparse = append_row(
+        &mut data,
+        posting_credit,
+        0,
+        &[
+            (Cell::Int(25_473), ColType::Integer),
+            (Cell::Int(11_612), ColType::Integer),
+            (Cell::Null, ColType::Integer),
+            (Cell::Null, ColType::Numeric),
+            (Cell::Str("Draft".to_owned()), ColType::Varchar),
+        ],
+    );
     (
         data,
         Roots {
             konto: account_sales,
             ver: voucher,
-            trans: posting_credit,
+            trans: posting_sparse,
         },
     )
 }
@@ -148,13 +160,15 @@ fn synthetic_data() -> (Vec<u8>, Roots) {
 fn append_row(data: &mut Vec<u8>, left: i32, right: i32, cells: &[(Cell, ColType)]) -> i32 {
     let offset = i32::try_from(data.len()).unwrap();
     let mut body = Vec::new();
+    body.extend_from_slice(&0_i32.to_be_bytes());
     body.extend_from_slice(&left.to_be_bytes());
     body.extend_from_slice(&right.to_be_bytes());
     body.extend_from_slice(&0_i32.to_be_bytes());
     for (cell, ty) in cells {
         write_cell(&mut body, cell, *ty);
     }
-    data.extend_from_slice(&i32::try_from(body.len()).unwrap().to_be_bytes());
+    let row_size = i32::try_from(body.len() + 4).unwrap();
+    data.extend_from_slice(&row_size.to_be_bytes());
     data.extend_from_slice(&body);
     offset
 }
@@ -184,12 +198,12 @@ fn script_text(roots: Roots) -> String {
         r#"
 CREATE CACHED TABLE "konto"("k_nr" INTEGER NOT NULL PRIMARY KEY,"k_namn" VARCHAR(50),"k_text" VARCHAR(200),"k_sru_p" INTEGER,"k_sru_m" INTEGER)
 CREATE CACHED TABLE "ver"("v_nr" INTEGER NOT NULL PRIMARY KEY,"v_datum" DATE NOT NULL,"v_text" VARCHAR(200))
-CREATE CACHED TABLE "trans"("t_nr" INTEGER NOT NULL PRIMARY KEY,"t_ver" INTEGER NOT NULL,"t_konto" INTEGER NOT NULL,"t_belopp" NUMERIC(50,2) NOT NULL,"t_text" VARCHAR(200))
+CREATE CACHED TABLE "trans"("t_nr" INTEGER NOT NULL PRIMARY KEY,"v_nr" INTEGER NOT NULL,"k_nr" INTEGER NOT NULL,"t_belopp" NUMERIC(50,2) NOT NULL,"t_text" VARCHAR(200))
 ALTER TABLE "ver" ALTER COLUMN "v_nr" RESTART WITH 11612
 ALTER TABLE "trans" ALTER COLUMN "t_nr" RESTART WITH 25471
-SET TABLE "konto" INDEX'{}'
-SET TABLE "ver" INDEX'{}'
-SET TABLE "trans" INDEX'{}'
+SET TABLE "konto" INDEX'{} 0'
+SET TABLE "ver" INDEX'{} 11612'
+SET TABLE "trans" INDEX'{} 25471'
 "#,
         roots.konto, roots.ver, roots.trans
     )

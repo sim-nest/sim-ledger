@@ -186,8 +186,8 @@ pub fn read_cell(buf: &[u8], pos: usize, ty: ColType) -> Result<(Cell, usize), H
             Ok((Cell::Date(date_from_millis(millis)?), pos))
         }
         ColType::Numeric => {
-            let (scale, pos) = read_i32(buf, pos)?;
             let (bytes, pos) = read_len_bytes(buf, pos)?;
+            let (scale, pos) = read_i32(buf, pos)?;
             let unscaled = decode_big_integer(bytes)?;
             Ok((Cell::Num(to_minor_units(unscaled, scale)?), pos))
         }
@@ -210,8 +210,8 @@ pub fn write_cell(out: &mut Vec<u8>, cell: &Cell, ty: ColType) {
         (Cell::Str(value), ColType::Varchar) => write_len_bytes(out, value.as_bytes()),
         (Cell::Date(value), ColType::Date) => write_i64(out, millis_from_date(value)),
         (Cell::Num(value), ColType::Numeric) => {
-            write_i32(out, 2);
             write_len_bytes(out, &encode_big_integer(*value));
+            write_i32(out, 2);
         }
         _ => panic!("HSQLDB cell/type mismatch: {cell:?} for {ty:?}"),
     }
@@ -406,6 +406,14 @@ mod tests {
     }
 
     #[test]
+    fn reads_hsqldb_numeric_payload_before_scale() {
+        let bytes = [PRESENT_MARKER, 0, 0, 0, 2, 0x04, 0xd2, 0, 0, 0, 2];
+        let (cell, pos) = read_cell(&bytes, 0, ColType::Numeric).unwrap();
+        assert_eq!(cell, Cell::Num(1_234));
+        assert_eq!(pos, bytes.len());
+    }
+
+    #[test]
     fn rejects_unsupported_numeric_scale() {
         let err = read_numeric(3, 1_234).unwrap_err();
         assert!(err.to_string().contains("unsupported HSQLDB NUMERIC scale"));
@@ -419,8 +427,8 @@ mod tests {
 
     fn read_numeric(scale: i32, unscaled: i64) -> Result<Cell, HsqlError> {
         let mut bytes = vec![PRESENT_MARKER];
-        write_i32(&mut bytes, scale);
         write_len_bytes(&mut bytes, &encode_big_integer(unscaled));
+        write_i32(&mut bytes, scale);
         let (cell, pos) = read_cell(&bytes, 0, ColType::Numeric)?;
         assert_eq!(pos, bytes.len());
         Ok(cell)
