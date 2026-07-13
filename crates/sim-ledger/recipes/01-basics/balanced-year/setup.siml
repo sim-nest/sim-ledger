@@ -1,0 +1,1 @@
+(quote (ledger/year (year 2024) (account 1910 "Bank") (account 3010 "Sales") (voucher 1 (post 1910 12500) (post 3010 -12500)) (check balance)))

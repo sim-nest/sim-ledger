@@ -1,0 +1,5 @@
+{"kind":"recipe","path":"crates/sim-ledger/recipes/01-basics/balanced-year/purpose.md"}
+{"kind":"recipe","path":"crates/sim-ledger/recipes/01-basics/balanced-year/recipe.toml"}
+{"kind":"recipe","path":"crates/sim-ledger/recipes/01-basics/balanced-year/setup.siml"}
+{"kind":"recipe","path":"crates/sim-ledger/recipes/01-basics/chapter.toml"}
+{"kind":"recipe","path":"crates/sim-ledger/recipes/book.toml"}

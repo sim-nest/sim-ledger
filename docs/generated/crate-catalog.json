@@ -1,6 +1,6 @@
 {
   "generator": "xtask crate-catalog v1",
-  "package_count": 4,
+  "package_count": 6,
   "packages": [
     {
       "description": "Command line imports and reports for sim-ledger sets.",
@@ -35,6 +35,30 @@
       "publish": "false",
       "readme": "crates/sim-ledger/README.md",
       "root": "crates/sim-ledger",
+      "target_kinds": [
+        "lib"
+      ]
+    },
+    {
+      "description": "Bookkeeping journal drafts and profile data for sim-ledger.",
+      "generated_readme": false,
+      "manifest": "crates/sim-lib-ledger-books/Cargo.toml",
+      "name": "sim-lib-ledger-books",
+      "publish": "false",
+      "readme": "crates/sim-lib-ledger-books/README.md",
+      "root": "crates/sim-lib-ledger-books",
+      "target_kinds": [
+        "lib"
+      ]
+    },
+    {
+      "description": "Fiscal-year close and financial statement helpers for sim-ledger.",
+      "generated_readme": false,
+      "manifest": "crates/sim-lib-ledger-close/Cargo.toml",
+      "name": "sim-lib-ledger-close",
+      "publish": "false",
+      "readme": "crates/sim-lib-ledger-close/README.md",
+      "root": "crates/sim-lib-ledger-close",
       "target_kinds": [
         "lib"
       ]
