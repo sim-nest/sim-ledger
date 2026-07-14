@@ -9,6 +9,7 @@
 
 #[cfg(feature = "sim")]
 pub mod codec;
+pub mod cookbook;
 pub mod import;
 pub mod model;
 pub mod report;
@@ -19,6 +20,7 @@ pub mod store;
 pub use codec::{
     BalancesCall, LedgerCodecError, balances_call_from_expr, balances_query_expr, report_to_expr,
 };
+pub use cookbook::{BalancedYearDemo, CookbookAccountBalance, balanced_year_demo};
 pub use import::{ImportError, SourcePosting, SourceVoucher, SourceYear, import_year};
 pub use model::{Account, Amount, Posting, Voucher, YearData, is_balanced};
 pub use report::{BalanceKey, BalanceRow, balances};
