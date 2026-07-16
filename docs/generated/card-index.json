@@ -1,10 +1,24 @@
 {
-  "schema": "sim.card-index.v1",
+  "card_count": 3,
   "cards": [
-    "crates/sim-ledger/recipes/01-basics/balanced-year/purpose.md",
-    "crates/sim-ledger/recipes/01-basics/balanced-year/recipe.toml",
-    "crates/sim-ledger/recipes/01-basics/balanced-year/setup.siml",
-    "crates/sim-ledger/recipes/01-basics/chapter.toml",
-    "crates/sim-ledger/recipes/book.toml"
-  ]
+    {
+      "id": "browse/catalog",
+      "kind": "browse-root",
+      "owner": "workspace",
+      "summary": "root browse catalog"
+    },
+    {
+      "id": "cookbook/ledger/core",
+      "kind": "cookbook-recipe",
+      "owner": "sim-ledger",
+      "summary": "Exact yearly ledger records and balance checks."
+    },
+    {
+      "id": "registry/catalog",
+      "kind": "browse-registry",
+      "owner": "workspace",
+      "summary": "registry catalog browse card"
+    }
+  ],
+  "generator": "xtask repo-contract v1"
 }

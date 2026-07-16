@@ -1,5 +1,47 @@
 {
-  "schema": "sim.rustdoc-index.v1",
-  "repo": "sim-ledger",
-  "target_doc": "target/doc/"
+  "generator": "xtask repo-contract v1",
+  "packages": [
+    {
+      "crate_name": "sim_ledger",
+      "group": "workspace",
+      "manifest": "crates/sim-ledger/Cargo.toml",
+      "package": "sim-ledger",
+      "summary": "Yearly ledger records and exact amount helpers."
+    },
+    {
+      "crate_name": "sim_ledger_cli",
+      "group": "workspace",
+      "manifest": "crates/sim-ledger-cli/Cargo.toml",
+      "package": "sim-ledger-cli",
+      "summary": "Command line runner for yearly ledger sets."
+    },
+    {
+      "crate_name": "sim_ledger_odb",
+      "group": "workspace",
+      "manifest": "crates/sim-ledger-odb/Cargo.toml",
+      "package": "sim-ledger-odb",
+      "summary": "LibreOffice Base import helpers for sim-ledger."
+    },
+    {
+      "crate_name": "sim_lib_ledger_books",
+      "group": "workspace",
+      "manifest": "crates/sim-lib-ledger-books/Cargo.toml",
+      "package": "sim-lib-ledger-books",
+      "summary": "Bookkeeping journal drafts and profile data for ledger sets."
+    },
+    {
+      "crate_name": "sim_lib_ledger_close",
+      "group": "workspace",
+      "manifest": "crates/sim-lib-ledger-close/Cargo.toml",
+      "package": "sim-lib-ledger-close",
+      "summary": "Fiscal-year close and financial statement helpers."
+    },
+    {
+      "crate_name": "xtask",
+      "group": "workspace",
+      "manifest": "xtask/Cargo.toml",
+      "package": "xtask",
+      "summary": "SIM workspace package for xtask."
+    }
+  ]
 }
