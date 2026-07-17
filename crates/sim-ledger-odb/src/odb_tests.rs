@@ -2,13 +2,16 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-use sim_ledger::{Account, Amount, SourcePosting, SourceVoucher};
+use sim_ledger::{
+    Account, Amount, BalanceKey, BalanceRow, LedgerSet, SourcePosting, SourceVoucher, balances,
+    import_year,
+};
 use tempfile::tempdir;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use crate::hsqldb::{Cell, write_cell};
-use crate::{ColType, read_odb};
+use crate::{ColType, OdbError, read_odb};
 
 const SCRIPT: &str = "database/script";
 const DATA: &str = "database/data";
@@ -75,6 +78,60 @@ fn reads_synthetic_odb_end_to_end() {
     );
 }
 
+#[test]
+fn complete_odb_rows_import_and_balance() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ledger-2024.odb");
+    let (data, roots) = synthetic_data();
+    let script = script_text(roots);
+    write_odb(&path, &script, &data, "hsqldb.cache_file_scale=1\n");
+    let source = read_odb(&path).unwrap();
+    let set_dir = dir.path().join("books");
+    let mut set = LedgerSet::create(&set_dir, "Imported").unwrap();
+
+    import_year(&mut set, source).unwrap();
+
+    assert_eq!(
+        balances(&set, &[2024], false).unwrap(),
+        vec![
+            BalanceRow {
+                key: BalanceKey::Account {
+                    year: 2024,
+                    account: 1910,
+                },
+                amount: Amount(1_200),
+            },
+            BalanceRow {
+                key: BalanceKey::Account {
+                    year: 2024,
+                    account: 3010,
+                },
+                amount: Amount(-1_200),
+            },
+        ]
+    );
+}
+
+#[test]
+fn sparse_transaction_rows_fail_closed() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ledger-2024.odb");
+    let (data, roots) = synthetic_data_with_sparse_posting();
+    let script = script_text(roots);
+    write_odb(&path, &script, &data, "hsqldb.cache_file_scale=1\n");
+
+    let err = read_odb(&path).unwrap_err();
+
+    assert!(matches!(
+        err,
+        OdbError::RequiredNull {
+            table: "trans",
+            column: "k_nr",
+            source_id: Some(25_473),
+        }
+    ));
+}
+
 fn synthetic_data() -> (Vec<u8>, Roots) {
     let mut data = vec![0; 16];
     let account_cash = append_row(
@@ -135,9 +192,21 @@ fn synthetic_data() -> (Vec<u8>, Roots) {
             (Cell::Str("Credit".to_owned()), ColType::Varchar),
         ],
     );
-    let posting_sparse = append_row(
+    (
+        data,
+        Roots {
+            konto: account_sales,
+            ver: voucher,
+            trans: posting_credit,
+        },
+    )
+}
+
+fn synthetic_data_with_sparse_posting() -> (Vec<u8>, Roots) {
+    let (mut data, mut roots) = synthetic_data();
+    roots.trans = append_row(
         &mut data,
-        posting_credit,
+        roots.trans,
         0,
         &[
             (Cell::Int(25_473), ColType::Integer),
@@ -147,14 +216,7 @@ fn synthetic_data() -> (Vec<u8>, Roots) {
             (Cell::Str("Draft".to_owned()), ColType::Varchar),
         ],
     );
-    (
-        data,
-        Roots {
-            konto: account_sales,
-            ver: voucher,
-            trans: posting_sparse,
-        },
-    )
+    (data, roots)
 }
 
 fn append_row(data: &mut Vec<u8>, left: i32, right: i32, cells: &[(Cell, ColType)]) -> i32 {

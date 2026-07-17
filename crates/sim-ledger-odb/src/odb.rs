@@ -69,6 +69,15 @@ pub enum OdbError {
         /// Column name.
         column: &'static str,
     },
+    /// A decoded row has null in a required field.
+    RequiredNull {
+        /// Table name.
+        table: &'static str,
+        /// Column name.
+        column: &'static str,
+        /// Source row id when that id was available before the null field.
+        source_id: Option<i64>,
+    },
     /// A source integer cannot fit in the target type.
     IntegerOutOfRange {
         /// Table name.
@@ -109,6 +118,17 @@ impl fmt::Display for OdbError {
             }
             OdbError::WrongCellType { table, column } => {
                 write!(f, "wrong cell type for {table}.{column}")
+            }
+            OdbError::RequiredNull {
+                table,
+                column,
+                source_id,
+            } => {
+                write!(f, "required ODB field {table}.{column} is null")?;
+                if let Some(source_id) = source_id {
+                    write!(f, " at source row {source_id}")?;
+                }
+                Ok(())
             }
             OdbError::IntegerOutOfRange {
                 table,
@@ -213,37 +233,27 @@ fn read_postings(data: &[u8], schema: &OdbSchema) -> Result<Vec<SourcePosting>, 
     let rows = table_rows(data, schema, "trans")?;
     let columns = column_index(schema, "trans")?;
     rows.iter()
-        .filter_map(|row| match posting_from_row(row, &columns) {
-            Ok(Some(posting)) => Some(Ok(posting)),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
-        })
+        .map(|row| posting_from_row(row, &columns))
         .collect()
 }
 
 fn posting_from_row(
     row: &[Cell],
     columns: &HashMap<&str, usize>,
-) -> Result<Option<SourcePosting>, OdbError> {
-    let Some(source_voucher_id) =
-        optional_int_cell_alias(row, columns, "trans", &["t_ver", "v_nr"])?
-    else {
-        return Ok(None);
-    };
-    let Some(account) = optional_int_cell_alias(row, columns, "trans", &["t_konto", "k_nr"])?
-    else {
-        return Ok(None);
-    };
-    let Some(amount) = optional_num_cell(row, columns, "trans", "t_belopp")? else {
-        return Ok(None);
-    };
-    Ok(Some(SourcePosting {
-        source_id: int_cell(row, columns, "trans", "t_nr")?,
+) -> Result<SourcePosting, OdbError> {
+    let source_id = required_int_cell(row, columns, "trans", "t_nr", None)?;
+    let source_voucher_id =
+        required_int_cell_alias(row, columns, "trans", &["t_ver", "v_nr"], Some(source_id))?;
+    let account =
+        required_int_cell_alias(row, columns, "trans", &["t_konto", "k_nr"], Some(source_id))?;
+    let amount = required_num_cell(row, columns, "trans", "t_belopp", Some(source_id))?;
+    Ok(SourcePosting {
+        source_id,
         source_voucher_id,
         account,
         amount: Amount(amount),
         text: optional_string_cell(row, columns, "trans", "t_text")?,
-    }))
+    })
 }
 
 fn table_rows(
@@ -298,18 +308,37 @@ fn int_cell(
     }
 }
 
-fn optional_int_cell_alias(
+fn required_int_cell_alias(
     row: &[Cell],
     columns: &HashMap<&str, usize>,
     table: &'static str,
     aliases: &[&'static str],
-) -> Result<Option<i64>, OdbError> {
-    let column = aliases
+    source_id: Option<i64>,
+) -> Result<i64, OdbError> {
+    let column = alias_column(columns, aliases);
+    required_int_cell(row, columns, table, column, source_id)
+}
+
+fn required_int_cell(
+    row: &[Cell],
+    columns: &HashMap<&str, usize>,
+    table: &'static str,
+    column: &'static str,
+    source_id: Option<i64>,
+) -> Result<i64, OdbError> {
+    optional_int_cell(row, columns, table, column)?.ok_or(OdbError::RequiredNull {
+        table,
+        column,
+        source_id,
+    })
+}
+
+fn alias_column(columns: &HashMap<&str, usize>, aliases: &[&'static str]) -> &'static str {
+    aliases
         .iter()
         .copied()
         .find(|column| columns.contains_key(column))
-        .unwrap_or(aliases[0]);
-    optional_int_cell(row, columns, table, column)
+        .unwrap_or(aliases[0])
 }
 
 fn optional_int_cell(
@@ -395,6 +424,20 @@ fn optional_num_cell(
         Cell::Num(value) => Ok(Some(*value)),
         _ => Err(OdbError::WrongCellType { table, column }),
     }
+}
+
+fn required_num_cell(
+    row: &[Cell],
+    columns: &HashMap<&str, usize>,
+    table: &'static str,
+    column: &'static str,
+    source_id: Option<i64>,
+) -> Result<i64, OdbError> {
+    optional_num_cell(row, columns, table, column)?.ok_or(OdbError::RequiredNull {
+        table,
+        column,
+        source_id,
+    })
 }
 
 fn cell<'a>(
