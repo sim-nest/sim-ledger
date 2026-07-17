@@ -11,7 +11,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use crate::hsqldb::{Cell, write_cell};
-use crate::{ColType, OdbError, read_odb};
+use crate::{ColType, OdbError, read_odb, read_odb_for_year};
 
 const SCRIPT: &str = "database/script";
 const DATA: &str = "database/data";
@@ -76,6 +76,21 @@ fn reads_synthetic_odb_end_to_end() {
             },
         ]
     );
+}
+
+#[test]
+fn explicit_year_reader_does_not_inspect_filename() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("books.odb");
+    let (data, roots) = synthetic_data();
+    let script = script_text(roots);
+    write_odb(&path, &script, &data, "hsqldb.cache_file_scale=1\n");
+
+    let year = read_odb_for_year(&path, 2024).unwrap();
+
+    assert_eq!(year.year, 2024);
+    assert_eq!(year.next_source_voucher_id, 11_612);
+    assert_eq!(year.next_source_posting_id, 25_471);
 }
 
 #[test]

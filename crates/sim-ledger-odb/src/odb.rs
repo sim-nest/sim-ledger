@@ -157,8 +157,22 @@ impl From<io::Error> for OdbError {
     }
 }
 
+/// Read a LibreOffice Base `.odb` ledger export for an explicit ledger year.
+pub fn read_odb_for_year(path: &Path, year: i32) -> Result<SourceYear, OdbError> {
+    read_odb_inner(path, year)
+}
+
 /// Read a LibreOffice Base `.odb` ledger export into a source year.
+///
+/// This convenience entry point infers the ledger year from trailing digits in
+/// the file stem. Use [`read_odb_for_year`] when the caller already has an
+/// authoritative year.
 pub fn read_odb(path: &Path) -> Result<SourceYear, OdbError> {
+    let year = year_from_path(path)?;
+    read_odb_inner(path, year)
+}
+
+fn read_odb_inner(path: &Path, year: i32) -> Result<SourceYear, OdbError> {
     let script_bytes = open_zip_member(path, SCRIPT)?;
     let data = open_zip_member(path, DATA)?;
     let properties_bytes = open_zip_member(path, PROPERTIES)?;
@@ -173,7 +187,6 @@ pub fn read_odb(path: &Path) -> Result<SourceYear, OdbError> {
     ensure_cache_scale_one(properties)?;
 
     let schema = parse_script(script);
-    let year = year_from_path(path)?;
     let accounts = read_accounts(&data, &schema)?;
     let vouchers = read_vouchers(&data, &schema)?;
     let postings = read_postings(&data, &schema)?;

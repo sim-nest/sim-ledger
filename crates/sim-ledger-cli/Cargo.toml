@@ -19,6 +19,7 @@ sim-ledger-odb = { version = "0.1.0", path = "../sim-ledger-odb" }
 
 [dev-dependencies]
 tempfile = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true

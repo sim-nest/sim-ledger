@@ -13,6 +13,6 @@ mod zip_member;
 
 pub use csv::{CsvLoadError, load_csv};
 pub use hsqldb::{Cell, HsqlError, read_cell, write_cell};
-pub use odb::{OdbError, read_odb};
+pub use odb::{OdbError, read_odb, read_odb_for_year};
 pub use script::{ColType, OdbSchema, parse_script};
 pub use zip_member::open_zip_member;

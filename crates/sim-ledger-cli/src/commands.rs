@@ -4,7 +4,7 @@ use std::num::TryFromIntError;
 use std::path::Path;
 
 use sim_ledger::{BalanceKey, BalanceRow, LedgerSet, SourceYear, balances, import_year};
-use sim_ledger_odb::{load_csv, parse_script, read_odb};
+use sim_ledger_odb::{load_csv, parse_script, read_odb_for_year};
 
 use crate::args::{Command, ImportSource, ReportGroup, YearSelection};
 use crate::error::CliError;
@@ -45,8 +45,7 @@ fn import_source(
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
     let mut set = LedgerSet::open(set_dir)?;
-    let mut source = read_source(source, year)?;
-    source.year = year;
+    let source = read_source(source, year)?;
     let summary = ImportSummary::from_source(&set, &source)?;
     import_year(&mut set, source)?;
     writeln!(
@@ -64,7 +63,7 @@ fn import_source(
 
 fn read_source(source: ImportSource, year: i32) -> Result<SourceYear, CliError> {
     match source {
-        ImportSource::Odb(path) => Ok(read_odb(&path)?),
+        ImportSource::Odb(path) => Ok(read_odb_for_year(&path, year)?),
         ImportSource::Csv(dir) => {
             let script = read_csv_script(&dir)?;
             let schema = parse_script(&script);
