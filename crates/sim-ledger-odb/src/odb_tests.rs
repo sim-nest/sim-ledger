@@ -10,7 +10,7 @@ use tempfile::tempdir;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-use crate::hsqldb::{Cell, write_cell};
+use crate::hsqldb::{Cell, try_write_cell};
 use crate::{ColType, OdbError, read_odb, read_odb_for_year};
 
 const SCRIPT: &str = "database/script";
@@ -242,7 +242,7 @@ fn append_row(data: &mut Vec<u8>, left: i32, right: i32, cells: &[(Cell, ColType
     body.extend_from_slice(&right.to_be_bytes());
     body.extend_from_slice(&0_i32.to_be_bytes());
     for (cell, ty) in cells {
-        write_cell(&mut body, cell, *ty);
+        try_write_cell(&mut body, cell, *ty).unwrap();
     }
     let row_size = i32::try_from(body.len() + 4).unwrap();
     data.extend_from_slice(&row_size.to_be_bytes());

@@ -162,6 +162,54 @@ impl std::error::Error for HsqlError {
     }
 }
 
+/// Failure while encoding an HSQLDB column value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WriteCellError {
+    /// A non-null cell was encoded with a column type from another domain.
+    TypeMismatch {
+        /// The cell variant being encoded.
+        cell: &'static str,
+        /// The requested HSQLDB column type.
+        ty: ColType,
+    },
+    /// HSQLDB length prefixes are signed 32-bit values.
+    LengthOutOfRange {
+        /// The byte length that does not fit in an HSQLDB length prefix.
+        len: usize,
+    },
+    /// Date cells must use ISO `YYYY-MM-DD` text.
+    InvalidDate {
+        /// The rejected date text.
+        value: String,
+    },
+    /// HSQLDB integer columns store signed 32-bit integers.
+    IntegerOutOfRange {
+        /// The rejected integer value.
+        value: i64,
+    },
+}
+
+impl fmt::Display for WriteCellError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WriteCellError::TypeMismatch { cell, ty } => {
+                write!(f, "HSQLDB cell/type mismatch: {cell} for {ty:?}")
+            }
+            WriteCellError::LengthOutOfRange { len } => {
+                write!(f, "HSQLDB byte length {len} does not fit in i32")
+            }
+            WriteCellError::InvalidDate { value } => {
+                write!(f, "invalid HSQLDB DATE cell {value:?}; expected YYYY-MM-DD")
+            }
+            WriteCellError::IntegerOutOfRange { value } => {
+                write!(f, "HSQLDB INTEGER value {value} does not fit in i32")
+            }
+        }
+    }
+}
+
+impl std::error::Error for WriteCellError {}
+
 /// Decode one column value at `pos`, returning the cell and the next position.
 pub fn read_cell(buf: &[u8], pos: usize, ty: ColType) -> Result<(Cell, usize), HsqlError> {
     let (marker, pos) = read_u8(buf, pos)?;
@@ -195,26 +243,43 @@ pub fn read_cell(buf: &[u8], pos: usize, ty: ColType) -> Result<(Cell, usize), H
 }
 
 /// Encode one column value using the HSQLDB type encoding.
-///
-/// Panics when a non-null cell does not match `ty`, when a date is not
-/// `YYYY-MM-DD`, or when an encoded length does not fit HSQLDB's i32 length.
-pub fn write_cell(out: &mut Vec<u8>, cell: &Cell, ty: ColType) {
+pub fn try_write_cell(out: &mut Vec<u8>, cell: &Cell, ty: ColType) -> Result<(), WriteCellError> {
     if matches!(cell, Cell::Null) {
         out.push(NULL_MARKER);
-        return;
+        return Ok(());
     }
 
-    out.push(PRESENT_MARKER);
     match (cell, ty) {
-        (Cell::Int(value), ColType::Integer) => write_i32(out, checked_i32(*value)),
-        (Cell::Str(value), ColType::Varchar) => write_len_bytes(out, value.as_bytes()),
-        (Cell::Date(value), ColType::Date) => write_i64(out, millis_from_date(value)),
+        (Cell::Int(value), ColType::Integer) => {
+            let value = checked_i32(*value)?;
+            out.push(PRESENT_MARKER);
+            write_i32(out, value);
+        }
+        (Cell::Str(value), ColType::Varchar) => {
+            let len = checked_hsqldb_len(value.len())?;
+            out.push(PRESENT_MARKER);
+            write_len_bytes_with_len(out, len, value.as_bytes());
+        }
+        (Cell::Date(value), ColType::Date) => {
+            let millis = millis_from_date(value)?;
+            out.push(PRESENT_MARKER);
+            write_i64(out, millis);
+        }
         (Cell::Num(value), ColType::Numeric) => {
-            write_len_bytes(out, &encode_big_integer(*value));
+            let bytes = encode_big_integer(*value);
+            let len = checked_hsqldb_len(bytes.len())?;
+            out.push(PRESENT_MARKER);
+            write_len_bytes_with_len(out, len, &bytes);
             write_i32(out, 2);
         }
-        _ => panic!("HSQLDB cell/type mismatch: {cell:?} for {ty:?}"),
+        _ => {
+            return Err(WriteCellError::TypeMismatch {
+                cell: cell.kind(),
+                ty,
+            });
+        }
     }
+    Ok(())
 }
 
 fn read_u8(buf: &[u8], pos: usize) -> Result<(u8, usize), HsqlError> {
@@ -261,8 +326,7 @@ fn write_i64(out: &mut Vec<u8>, value: i64) {
     out.extend_from_slice(&value.to_be_bytes());
 }
 
-fn write_len_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
-    let len = i32::try_from(bytes.len()).expect("HSQLDB byte length fits in i32");
+fn write_len_bytes_with_len(out: &mut Vec<u8>, len: i32, bytes: &[u8]) {
     write_i32(out, len);
     out.extend_from_slice(bytes);
 }
@@ -275,14 +339,17 @@ fn date_from_millis(millis: i64) -> Result<String, HsqlError> {
     Ok(format_date(date))
 }
 
-fn millis_from_date(value: &str) -> i64 {
-    let date = parse_date(value).expect("HSQLDB DATE cell uses YYYY-MM-DD");
-    date.with_hms(0, 0, 0)
+fn millis_from_date(value: &str) -> Result<i64, WriteCellError> {
+    let date = parse_date(value).ok_or_else(|| WriteCellError::InvalidDate {
+        value: value.to_owned(),
+    })?;
+    Ok(date
+        .with_hms(0, 0, 0)
         .expect("midnight is valid")
         .assume_utc()
         .unix_timestamp()
         .checked_mul(MILLIS_PER_SECOND)
-        .expect("HSQLDB DATE millis fit in i64")
+        .expect("HSQLDB DATE millis fit in i64"))
 }
 
 fn parse_date(value: &str) -> Option<Date> {
@@ -363,74 +430,22 @@ fn pow10(exponent: i32) -> Result<i64, HsqlError> {
     Ok(value)
 }
 
-fn checked_i32(value: i64) -> i32 {
-    i32::try_from(value).expect("HSQLDB INTEGER cell fits in i32")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn round_trips_all_supported_column_types() {
-        let cases = [
-            (Cell::Null, ColType::Integer),
-            (Cell::Null, ColType::Varchar),
-            (Cell::Null, ColType::Date),
-            (Cell::Null, ColType::Numeric),
-            (Cell::Int(-42), ColType::Integer),
-            (Cell::Str("konto-rad alpha".to_owned()), ColType::Varchar),
-            (
-                Cell::Str("r\u{00e4}nta p\u{00e5} \u{00e5}ret".to_owned()),
-                ColType::Varchar,
-            ),
-            (Cell::Date("2024-02-29".to_owned()), ColType::Date),
-            (Cell::Num(123_456), ColType::Numeric),
-            (Cell::Num(-123_456), ColType::Numeric),
-        ];
-
-        for (cell, ty) in cases {
-            let mut bytes = Vec::new();
-            write_cell(&mut bytes, &cell, ty);
-            let (decoded, pos) = read_cell(&bytes, 0, ty).unwrap();
-            assert_eq!(decoded, cell);
-            assert_eq!(pos, bytes.len());
+impl Cell {
+    fn kind(&self) -> &'static str {
+        match self {
+            Cell::Null => "null",
+            Cell::Int(_) => "int",
+            Cell::Str(_) => "str",
+            Cell::Date(_) => "date",
+            Cell::Num(_) => "num",
         }
     }
+}
 
-    #[test]
-    fn reads_numeric_scales_as_minor_units() {
-        assert_eq!(read_numeric(0, 1_234).unwrap(), Cell::Num(123_400));
-        assert_eq!(read_numeric(1, 1_234).unwrap(), Cell::Num(12_340));
-        assert_eq!(read_numeric(2, 1_234).unwrap(), Cell::Num(1_234));
-    }
+fn checked_i32(value: i64) -> Result<i32, WriteCellError> {
+    i32::try_from(value).map_err(|_| WriteCellError::IntegerOutOfRange { value })
+}
 
-    #[test]
-    fn reads_hsqldb_numeric_payload_before_scale() {
-        let bytes = [PRESENT_MARKER, 0, 0, 0, 2, 0x04, 0xd2, 0, 0, 0, 2];
-        let (cell, pos) = read_cell(&bytes, 0, ColType::Numeric).unwrap();
-        assert_eq!(cell, Cell::Num(1_234));
-        assert_eq!(pos, bytes.len());
-    }
-
-    #[test]
-    fn rejects_unsupported_numeric_scale() {
-        let err = read_numeric(3, 1_234).unwrap_err();
-        assert!(err.to_string().contains("unsupported HSQLDB NUMERIC scale"));
-    }
-
-    #[test]
-    fn fails_closed_on_truncated_input() {
-        let err = read_cell(&[PRESENT_MARKER, 0, 0], 0, ColType::Integer).unwrap_err();
-        assert!(err.to_string().contains("unexpected end"));
-    }
-
-    fn read_numeric(scale: i32, unscaled: i64) -> Result<Cell, HsqlError> {
-        let mut bytes = vec![PRESENT_MARKER];
-        write_len_bytes(&mut bytes, &encode_big_integer(unscaled));
-        write_i32(&mut bytes, scale);
-        let (cell, pos) = read_cell(&bytes, 0, ColType::Numeric)?;
-        assert_eq!(pos, bytes.len());
-        Ok(cell)
-    }
+pub(super) fn checked_hsqldb_len(len: usize) -> Result<i32, WriteCellError> {
+    i32::try_from(len).map_err(|_| WriteCellError::LengthOutOfRange { len })
 }

@@ -112,7 +112,7 @@ fn read_i32(buf: &[u8], pos: usize) -> Result<(i32, usize), HsqlError> {
 mod tests {
     use super::*;
     use crate::ColType;
-    use crate::hsqldb::write_cell;
+    use crate::hsqldb::try_write_cell;
 
     #[test]
     fn walks_primary_index_in_order() {
@@ -170,7 +170,7 @@ mod tests {
         body.extend_from_slice(&0_i32.to_be_bytes());
         body.extend_from_slice(&0_i32.to_be_bytes());
         for (cell, ty) in cells {
-            write_cell(&mut body, cell, *ty);
+            try_write_cell(&mut body, cell, *ty).unwrap();
         }
         let row_size = i32::try_from(body.len() + 4).unwrap();
         data.extend_from_slice(&row_size.to_be_bytes());

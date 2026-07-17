@@ -273,10 +273,10 @@
     "generated_by": "cargo run -p xtask -- simdoc",
     "generation_timestamp": "2026-07-15T01:30:21+02:00",
     "generator": "xtask repo-contract v1",
-    "git_commit": "39b3643a8b1b293da8ebf93473833e29e33d1819",
+    "git_commit": "9324392dff09fa94f1c7462b2663ea6f8cf1eb34",
     "repo": "sim-ledger",
     "schema": "sim.provenance.v1",
-    "source_commit": "39b3643a8b1b293da8ebf93473833e29e33d1819",
+    "source_commit": "9324392dff09fa94f1c7462b2663ea6f8cf1eb34",
     "source_remote": "https://github.com/sim-nest/sim-ledger",
     "validation_commands": [
       "cargo fmt --all --check",
@@ -289,9 +289,9 @@
       "cargo run -p xtask -- validation-matrix --check --repo .",
       "cargo run -p xtask -- crate-catalog --check --repo ."
     ],
-    "workspace_hash": "8efd543eafbecede",
+    "workspace_hash": "5d6614df718b6b14",
     "workspace_hash_algorithm": "fnv1a64",
-    "workspace_hash_input_count": 42,
+    "workspace_hash_input_count": 43,
     "workspace_hash_inputs": [
       "Cargo.toml",
       "crates/sim-ledger/Cargo.toml",
@@ -317,6 +317,7 @@
       "crates/sim-ledger-odb/src/csv.rs",
       "crates/sim-ledger-odb/src/hsqldb/mod.rs",
       "crates/sim-ledger-odb/src/hsqldb/row.rs",
+      "crates/sim-ledger-odb/src/hsqldb/row_tests.rs",
       "crates/sim-ledger-odb/src/hsqldb/table.rs",
       "crates/sim-ledger-odb/src/lib.rs",
       "crates/sim-ledger-odb/src/odb.rs",
