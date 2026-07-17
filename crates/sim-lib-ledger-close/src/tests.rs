@@ -86,6 +86,61 @@ fn financial_statement_totals_are_exact() {
     assert_eq!(statements.income_statement.total_minor().unwrap(), -1_200);
 }
 
+#[test]
+fn close_year_rejects_offsetting_unbalanced_vouchers() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut set = LedgerSet::create(dir.path(), "Close").unwrap();
+    write_offsetting_unbalanced_year(&mut set, 2026);
+
+    let err = close_year(&mut set, 2026).unwrap_err();
+
+    assert!(matches!(
+        err,
+        CloseError::UnbalancedVoucher {
+            voucher: 1,
+            posting_count: 2,
+            minor_sum: 100,
+        }
+    ));
+    assert_eq!(close_state(&set, 2026).unwrap(), ClosingState::Open);
+}
+
+#[test]
+fn financial_statements_reject_empty_vouchers() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut set = LedgerSet::create(dir.path(), "Close").unwrap();
+    write_empty_voucher_year(&mut set, 2026);
+
+    let err = financial_statements(&set, 2026).unwrap_err();
+
+    assert!(matches!(
+        err,
+        CloseError::UnbalancedVoucher {
+            voucher: 1,
+            posting_count: 0,
+            minor_sum: 0,
+        }
+    ));
+}
+
+#[test]
+fn sru_comparison_rejects_unbalanced_vouchers() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut set = LedgerSet::create(dir.path(), "Close").unwrap();
+    write_offsetting_unbalanced_year(&mut set, 2026);
+
+    let err = compare_by_sru(&set, &[2026]).unwrap_err();
+
+    assert!(matches!(
+        err,
+        CloseError::UnbalancedVoucher {
+            voucher: 1,
+            posting_count: 2,
+            minor_sum: 100,
+        }
+    ));
+}
+
 fn write_year(set: &mut LedgerSet, year: i32, debit_account: i64, credit_account: i64, minor: i64) {
     let voucher_id = set.alloc_voucher_ids(1).start;
     let posting_ids: Vec<i64> = set.alloc_posting_ids(2).collect();
@@ -126,6 +181,61 @@ fn write_year(set: &mut LedgerSet, year: i32, debit_account: i64, credit_account
         .unwrap();
     set.manifest.years.push(year);
     set.save().unwrap();
+}
+
+fn write_offsetting_unbalanced_year(set: &mut LedgerSet, year: i32) {
+    let voucher_ids: Vec<i64> = set.alloc_voucher_ids(2).collect();
+    let posting_ids: Vec<i64> = set.alloc_posting_ids(4).collect();
+    let store = YearStore::create(&set.year_path(year), year).unwrap();
+    store
+        .insert_account(&account(1910, "Asset", Some(1000), None))
+        .unwrap();
+    store
+        .insert_account(&account(3010, "Income", None, Some(3000)))
+        .unwrap();
+    insert_voucher(&store, voucher_ids[0], year, "Offset one");
+    insert_voucher(&store, voucher_ids[1], year, "Offset two");
+    insert_posting(&store, posting_ids[0], voucher_ids[0], 1910, 300);
+    insert_posting(&store, posting_ids[1], voucher_ids[0], 3010, -200);
+    insert_posting(&store, posting_ids[2], voucher_ids[1], 1910, 200);
+    insert_posting(&store, posting_ids[3], voucher_ids[1], 3010, -300);
+    set.manifest.years.push(year);
+    set.save().unwrap();
+}
+
+fn write_empty_voucher_year(set: &mut LedgerSet, year: i32) {
+    let voucher_id = set.alloc_voucher_ids(1).start;
+    let store = YearStore::create(&set.year_path(year), year).unwrap();
+    store
+        .insert_account(&account(1910, "Asset", Some(1000), None))
+        .unwrap();
+    insert_voucher(&store, voucher_id, year, "Empty");
+    set.manifest.years.push(year);
+    set.save().unwrap();
+}
+
+fn insert_voucher(store: &YearStore, id: i64, year: i32, text: &str) {
+    store
+        .insert_voucher(&Voucher {
+            id,
+            source_id: Some(id),
+            date: format!("{year}-12-31"),
+            text: Some(text.to_owned()),
+        })
+        .unwrap();
+}
+
+fn insert_posting(store: &YearStore, id: i64, voucher_id: i64, account: i64, minor: i64) {
+    store
+        .insert_posting(&Posting {
+            id,
+            source_id: Some(id),
+            voucher_id,
+            account,
+            amount: Amount(minor),
+            text: None,
+        })
+        .unwrap();
 }
 
 fn account(number: i64, name: &str, sru_plus: Option<i32>, sru_minus: Option<i32>) -> Account {

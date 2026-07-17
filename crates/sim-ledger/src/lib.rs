@@ -22,7 +22,10 @@ pub use codec::{
 };
 pub use cookbook::{BalancedYearDemo, CookbookAccountBalance, balanced_year_demo};
 pub use import::{ImportError, SourcePosting, SourceVoucher, SourceYear, import_year};
-pub use model::{Account, Amount, Posting, Voucher, YearData, is_balanced};
+pub use model::{
+    Account, Amount, BalanceError, Posting, Voucher, VoucherBalanceViolation, YearData,
+    is_balanced, is_voucher_balanced, voucher_balance_violations,
+};
 pub use report::{BalanceKey, BalanceRow, balances};
 pub use set::{LedgerSet, SetManifest};
 pub use store::YearStore;

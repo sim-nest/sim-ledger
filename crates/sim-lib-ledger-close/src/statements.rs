@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use sim_ledger::{BalanceKey, LedgerSet, balances};
+use sim_ledger::{BalanceKey, LedgerSet, YearStore, balances};
 
 use crate::trial_balance::{TrialBalanceRow, trial_balance};
 use crate::{CloseError, checked_i64};
@@ -95,6 +95,7 @@ pub struct SruComparativeRow {
 
 /// Build financial statements from one ledger year.
 pub fn financial_statements(set: &LedgerSet, year: i32) -> Result<FinancialStatements, CloseError> {
+    ensure_vouchers_balanced(set, year)?;
     let trial_balance = trial_balance(set, year)?;
     let total = checked_i64(
         trial_balance
@@ -129,6 +130,7 @@ pub fn compare_by_sru(
     let mut by_year = Vec::with_capacity(years.len());
     let mut all_sru = BTreeSet::new();
     for year in years {
+        ensure_vouchers_balanced(set, *year)?;
         let mut year_rows = BTreeMap::new();
         for row in balances(set, &[*year], true)? {
             if let BalanceKey::Sru { code } = row.key {
@@ -152,6 +154,18 @@ pub fn compare_by_sru(
                 .collect(),
         })
         .collect())
+}
+
+fn ensure_vouchers_balanced(set: &LedgerSet, year: i32) -> Result<(), CloseError> {
+    let store = YearStore::open(&set.year_path(year))?;
+    if let Some(violation) = store.voucher_balance_violations()?.into_iter().next() {
+        return Err(CloseError::UnbalancedVoucher {
+            voucher: violation.voucher_id,
+            posting_count: violation.posting_count,
+            minor_sum: violation.minor_sum,
+        });
+    }
+    Ok(())
 }
 
 fn table_from_rows(

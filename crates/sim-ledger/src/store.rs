@@ -6,7 +6,7 @@ use std::path::Path;
 use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::model::{Account, Amount, Posting, Voucher};
+use crate::model::{Account, Amount, Posting, Voucher, VoucherBalanceViolation};
 
 const SCHEMA: &str = include_str!("schema.sql");
 const META_CLOSING_STATE: &str = "closing_state";
@@ -163,6 +163,30 @@ impl YearStore {
         rows.collect()
     }
 
+    /// Return persisted vouchers that have no postings or a nonzero posting sum.
+    pub fn voucher_balance_violations(&self) -> rusqlite::Result<Vec<VoucherBalanceViolation>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT v.id, COUNT(p.id), COALESCE(SUM(p.minor), 0) \
+             FROM voucher v \
+             LEFT JOIN posting p ON p.voucher_id = v.id \
+             GROUP BY v.id \
+             HAVING COUNT(p.id) = 0 OR COALESCE(SUM(p.minor), 0) != 0 \
+             ORDER BY v.id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let posting_count = row.get::<_, i64>(1)?;
+            let posting_count = usize::try_from(posting_count).map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(1, Type::Integer, Box::new(err))
+            })?;
+            Ok(VoucherBalanceViolation {
+                voucher_id: row.get(0)?,
+                posting_count,
+                minor_sum: row.get(2)?,
+            })
+        })?;
+        rows.collect()
+    }
+
     fn ensure_mutable(&self) -> rusqlite::Result<()> {
         if self.is_closed()? {
             return Err(rusqlite::Error::InvalidQuery);
@@ -269,6 +293,59 @@ mod tests {
         drop(store);
 
         assert!(YearStore::create(&path, 2023).is_err());
+    }
+
+    #[test]
+    fn year_store_reports_voucher_balance_violations() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("2024.sqlite");
+        let store = YearStore::create(&path, 2024).unwrap();
+        store.insert_account(&account(1910, "Cash")).unwrap();
+        store.insert_account(&account(3010, "Sales")).unwrap();
+        store
+            .insert_voucher(&Voucher {
+                id: 1,
+                source_id: None,
+                date: "2024-01-01".to_owned(),
+                text: None,
+            })
+            .unwrap();
+        store
+            .insert_voucher(&Voucher {
+                id: 2,
+                source_id: None,
+                date: "2024-01-02".to_owned(),
+                text: None,
+            })
+            .unwrap();
+        store
+            .insert_posting(&Posting {
+                id: 1,
+                source_id: None,
+                voucher_id: 1,
+                account: 1910,
+                amount: Amount(100),
+                text: None,
+            })
+            .unwrap();
+
+        let violations = store.voucher_balance_violations().unwrap();
+
+        assert_eq!(
+            violations,
+            vec![
+                VoucherBalanceViolation {
+                    voucher_id: 1,
+                    posting_count: 1,
+                    minor_sum: 100,
+                },
+                VoucherBalanceViolation {
+                    voucher_id: 2,
+                    posting_count: 0,
+                    minor_sum: 0,
+                },
+            ]
+        );
     }
 
     fn account(number: i64, name: &str) -> Account {

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::{Account, Amount, Posting, Voucher, YearData, is_balanced};
+use crate::{Account, Amount, Posting, Voucher, YearData, voucher_balance_violations};
 
 /// Account balance row produced by the balanced-year cookbook recipe.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,7 +26,7 @@ pub struct BalancedYearDemo {
     pub voucher_count: usize,
     /// Number of modeled posting lines.
     pub posting_count: usize,
-    /// Whether the voucher posting lines sum to zero.
+    /// Whether every voucher has posting lines that sum to zero.
     pub balanced: bool,
     /// Per-account balances for the modeled year.
     pub balances: Vec<CookbookAccountBalance>,
@@ -43,7 +43,8 @@ pub fn balanced_year_demo() -> BalancedYearDemo {
         account_count: year.accounts.len(),
         voucher_count: year.vouchers.len(),
         posting_count: year.postings.len(),
-        balanced: is_balanced(&year.postings),
+        balanced: voucher_balance_violations(&year.vouchers, &year.postings)
+            .is_ok_and(|violations| violations.is_empty()),
         balances,
     }
 }

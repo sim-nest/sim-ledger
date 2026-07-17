@@ -32,6 +32,15 @@ pub enum CloseError {
         /// Signed minor-unit sum across all trial-balance rows.
         minor_sum: i64,
     },
+    /// One voucher has no postings or does not sum to zero.
+    UnbalancedVoucher {
+        /// Canonical voucher id.
+        voucher: i64,
+        /// Number of posting lines attached to the voucher.
+        posting_count: usize,
+        /// Signed minor-unit sum for the voucher.
+        minor_sum: i64,
+    },
     /// A close/reopen state entry was malformed.
     InvalidState(String),
     /// An exact minor-unit calculation overflowed.
@@ -45,6 +54,16 @@ impl fmt::Display for CloseError {
             Self::Sql(error) => write!(f, "ledger close SQL failed: {error}"),
             Self::UnbalancedTrialBalance { minor_sum } => {
                 write!(f, "trial balance is unbalanced by {minor_sum} minor units")
+            }
+            Self::UnbalancedVoucher {
+                voucher,
+                posting_count,
+                minor_sum,
+            } => {
+                write!(
+                    f,
+                    "voucher {voucher} has {posting_count} postings and is unbalanced by {minor_sum} minor units"
+                )
             }
             Self::InvalidState(message) => write!(f, "invalid close state: {message}"),
             Self::ArithmeticOverflow(role) => write!(f, "{role} overflows minor units"),

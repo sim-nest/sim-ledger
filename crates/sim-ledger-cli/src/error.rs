@@ -29,9 +29,13 @@ impl fmt::Display for CliError {
         match self {
             CliError::Io(source) => write!(f, "{source}"),
             CliError::Report(source) => write!(f, "SQLite report failure: {source}"),
-            CliError::Import(ImportError::Unbalanced { voucher, minor_sum }) => write!(
+            CliError::Import(ImportError::Unbalanced {
+                voucher,
+                posting_count,
+                minor_sum,
+            }) => write!(
                 f,
-                "import rejected: voucher {voucher} is unbalanced by {minor_sum} minor units"
+                "import rejected: voucher {voucher} has {posting_count} postings and is unbalanced by {minor_sum} minor units"
             ),
             CliError::Import(source) => write!(f, "{source}"),
             CliError::Csv(source) => write!(f, "{source}"),

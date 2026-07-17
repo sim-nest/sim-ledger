@@ -273,10 +273,10 @@
     "generated_by": "cargo run -p xtask -- simdoc",
     "generation_timestamp": "2026-07-15T01:30:21+02:00",
     "generator": "xtask repo-contract v1",
-    "git_commit": "7046ca53bc9ecf18513626ea0bb22bdfc1010db0",
+    "git_commit": "a595bd7394fab850cf6c109c162dcb593397467d",
     "repo": "sim-ledger",
     "schema": "sim.provenance.v1",
-    "source_commit": "7046ca53bc9ecf18513626ea0bb22bdfc1010db0",
+    "source_commit": "a595bd7394fab850cf6c109c162dcb593397467d",
     "source_remote": "https://github.com/sim-nest/sim-ledger",
     "validation_commands": [
       "cargo fmt --all --check",
@@ -289,7 +289,7 @@
       "cargo run -p xtask -- validation-matrix --check --repo .",
       "cargo run -p xtask -- crate-catalog --check --repo ."
     ],
-    "workspace_hash": "e0473256cd7c524b",
+    "workspace_hash": "096c0ab5beac4109",
     "workspace_hash_algorithm": "fnv1a64",
     "workspace_hash_input_count": 41,
     "workspace_hash_inputs": [

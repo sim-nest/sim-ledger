@@ -5,7 +5,7 @@ use std::fmt;
 use std::fs;
 use std::num::TryFromIntError;
 
-use crate::model::{Account, Amount, Posting, Voucher};
+use crate::model::{Account, Amount, BalanceError, Posting, Voucher, voucher_balance_violations};
 use crate::set::LedgerSet;
 use crate::store::YearStore;
 
@@ -89,6 +89,8 @@ pub enum ImportError {
     Unbalanced {
         /// Canonical voucher id.
         voucher: i64,
+        /// Number of posting lines attached to the voucher.
+        posting_count: usize,
         /// Signed minor-unit sum for the voucher.
         minor_sum: i64,
     },
@@ -123,10 +125,14 @@ impl fmt::Display for ImportError {
             ImportError::MissingVoucher { source_voucher_id } => {
                 write!(f, "missing source voucher id {source_voucher_id}")
             }
-            ImportError::Unbalanced { voucher, minor_sum } => {
+            ImportError::Unbalanced {
+                voucher,
+                posting_count,
+                minor_sum,
+            } => {
                 write!(
                     f,
-                    "voucher {voucher} is unbalanced by {minor_sum} minor units"
+                    "voucher {voucher} has {posting_count} postings and is unbalanced by {minor_sum} minor units"
                 )
             }
             ImportError::BalanceOverflow { voucher } => {
@@ -218,7 +224,6 @@ pub fn import_year(set: &mut LedgerSet, src: SourceYear) -> Result<(), ImportErr
     }
 
     let mut seen_postings = BTreeSet::new();
-    let mut balance_by_voucher = BTreeMap::new();
     let mut postings = Vec::with_capacity(source_postings.len());
     for (source, canonical_id) in source_postings.into_iter().zip(posting_ids) {
         if !seen_postings.insert(source.source_id) {
@@ -231,12 +236,6 @@ pub fn import_year(set: &mut LedgerSet, src: SourceYear) -> Result<(), ImportErr
                 source_voucher_id: source.source_voucher_id,
             },
         )?;
-        let balance = balance_by_voucher.entry(voucher_id).or_insert(0_i64);
-        *balance = balance
-            .checked_add(source.amount.0)
-            .ok_or(ImportError::BalanceOverflow {
-                voucher: voucher_id,
-            })?;
         postings.push(Posting {
             id: canonical_id,
             source_id: Some(source.source_id),
@@ -247,19 +246,27 @@ pub fn import_year(set: &mut LedgerSet, src: SourceYear) -> Result<(), ImportErr
         });
     }
 
-    for voucher in &vouchers {
-        let minor_sum = balance_by_voucher.get(&voucher.id).copied().unwrap_or(0);
-        if minor_sum != 0 {
-            return Err(ImportError::Unbalanced {
-                voucher: voucher.id,
-                minor_sum,
-            });
-        }
+    let violations =
+        voucher_balance_violations(&vouchers, &postings).map_err(import_balance_error)?;
+    if let Some(violation) = violations.first() {
+        return Err(ImportError::Unbalanced {
+            voucher: violation.voucher_id,
+            posting_count: violation.posting_count,
+            minor_sum: violation.minor_sum,
+        });
     }
 
     write_imported_year(&mut draft_set, year, &accounts, &vouchers, &postings)?;
     *set = draft_set;
     Ok(())
+}
+
+fn import_balance_error(error: BalanceError) -> ImportError {
+    match error {
+        BalanceError::SumOverflow { voucher_id } => ImportError::BalanceOverflow {
+            voucher: voucher_id,
+        },
+    }
 }
 
 fn count_as_i64(row_kind: &'static str, count: usize) -> Result<i64, ImportError> {
@@ -400,7 +407,31 @@ mod tests {
             err,
             ImportError::Unbalanced {
                 voucher: 11_612,
+                posting_count: 2,
                 minor_sum: 1
+            }
+        ));
+        assert_eq!(set.manifest.next_voucher_id, 1);
+        assert_eq!(set.manifest.next_posting_id, 1);
+        assert!(set.manifest.years.is_empty());
+        assert!(!set.year_path(2024).exists());
+    }
+
+    #[test]
+    fn source_year_with_empty_voucher_is_rejected_without_mutating_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
+        let mut source = balanced_source_year(2024, 11_612, 25_471, 1_200);
+        source.postings.clear();
+
+        let err = import_year(&mut set, source).unwrap_err();
+
+        assert!(matches!(
+            err,
+            ImportError::Unbalanced {
+                voucher: 11_612,
+                posting_count: 0,
+                minor_sum: 0
             }
         ));
         assert_eq!(set.manifest.next_voucher_id, 1);
