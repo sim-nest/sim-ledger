@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Write;
+use std::num::TryFromIntError;
 use std::path::Path;
 
 use sim_ledger::{BalanceKey, BalanceRow, LedgerSet, SourceYear, balances, import_year};
@@ -144,30 +145,32 @@ struct ImportSummary {
 
 impl ImportSummary {
     fn from_source(set: &LedgerSet, source: &SourceYear) -> Result<ImportSummary, CliError> {
-        let voucher_start = set
+        let mut preview = set.clone();
+        preview.manifest.next_voucher_id = preview
             .manifest
             .next_voucher_id
             .max(source.next_source_voucher_id);
-        let posting_start = set
+        preview.manifest.next_posting_id = preview
             .manifest
             .next_posting_id
             .max(source.next_source_posting_id);
+        let voucher_ids =
+            preview.alloc_voucher_ids(count_as_i64("voucher", source.vouchers.len())?)?;
+        let posting_ids =
+            preview.alloc_posting_ids(count_as_i64("posting", source.postings.len())?)?;
         Ok(ImportSummary {
             year: source.year,
             account_count: source.accounts.len(),
             voucher_count: source.vouchers.len(),
             posting_count: source.postings.len(),
-            voucher_start,
-            voucher_end: range_end("voucher", voucher_start, source.vouchers.len())?,
-            posting_start,
-            posting_end: range_end("posting", posting_start, source.postings.len())?,
+            voucher_start: voucher_ids.start,
+            voucher_end: voucher_ids.end,
+            posting_start: posting_ids.start,
+            posting_end: posting_ids.end,
         })
     }
 }
 
-fn range_end(row_kind: &'static str, start: i64, count: usize) -> Result<i64, CliError> {
-    let count = i64::try_from(count).map_err(|_| CliError::CountOverflow { row_kind, count })?;
-    start
-        .checked_add(count)
-        .ok_or(CliError::RangeOverflow { row_kind, start })
+fn count_as_i64(row_kind: &'static str, count: usize) -> Result<i64, CliError> {
+    i64::try_from(count).map_err(|_: TryFromIntError| CliError::CountOverflow { row_kind, count })
 }

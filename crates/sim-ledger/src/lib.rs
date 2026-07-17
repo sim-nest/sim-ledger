@@ -16,6 +16,9 @@ pub mod report;
 pub mod set;
 pub mod store;
 
+#[cfg(test)]
+mod import_tests;
+
 #[cfg(feature = "sim")]
 pub use codec::{
     BalancesCall, LedgerCodecError, balances_call_from_expr, balances_query_expr, report_to_expr,
@@ -27,5 +30,5 @@ pub use model::{
     is_balanced, is_voucher_balanced, voucher_balance_violations,
 };
 pub use report::{BalanceKey, BalanceRow, balances};
-pub use set::{LedgerSet, SetManifest};
+pub use set::{IdAllocationError, LedgerSet, SetManifest};
 pub use store::YearStore;

@@ -63,6 +63,43 @@ fn unbalanced_import_names_the_rejected_voucher() {
     assert!(err.contains("unbalanced"), "{err}");
 }
 
+#[test]
+fn overflowing_import_cursor_reports_error_without_rewriting_manifest() {
+    let temp = tempfile::tempdir().unwrap();
+    let set_dir = temp.path().join("books");
+    let csv_dir = temp.path().join("csv");
+    fs::create_dir(&csv_dir).unwrap();
+    write_csv_export(&csv_dir, TRANS_BALANCED);
+
+    let (code, _, err) = run_command(["new", path(&set_dir), "--label", "Personal"]);
+    assert_eq!(code, 0, "{err}");
+    let manifest = format!(
+        "label = \"Personal\"\nnext_voucher_id = {}\nnext_posting_id = 1\nyears = []\n",
+        i64::MAX
+    );
+    fs::write(set_dir.join("ledger-set.toml"), &manifest).unwrap();
+
+    let (code, _, err) = run_command([
+        "import",
+        path(&set_dir),
+        "--csv",
+        path(&csv_dir),
+        "--year",
+        "2024",
+    ]);
+
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("voucher id range starting at 9223372036854775807"),
+        "{err}"
+    );
+    assert!(err.contains("overflows i64"), "{err}");
+    assert_eq!(
+        fs::read_to_string(set_dir.join("ledger-set.toml")).unwrap(),
+        manifest
+    );
+}
+
 fn run_command<const N: usize>(args: [&str; N]) -> (i32, String, String) {
     let mut out = Vec::new();
     let mut err = Vec::new();

@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use sim_ledger::ImportError;
+use sim_ledger::{IdAllocationError, ImportError};
 use sim_ledger_odb::{CsvLoadError, OdbError};
 
 #[derive(Debug)]
@@ -18,9 +18,8 @@ pub(crate) enum CliError {
         row_kind: &'static str,
         count: usize,
     },
-    RangeOverflow {
-        row_kind: &'static str,
-        start: i64,
+    IdAllocation {
+        source: IdAllocationError,
     },
 }
 
@@ -48,8 +47,8 @@ impl fmt::Display for CliError {
             CliError::CountOverflow { row_kind, count } => {
                 write!(f, "{row_kind} count {count} cannot fit in i64")
             }
-            CliError::RangeOverflow { row_kind, start } => {
-                write!(f, "{row_kind} id range starting at {start} overflows i64")
+            CliError::IdAllocation { source } => {
+                write!(f, "{source}")
             }
         }
     }
@@ -63,6 +62,7 @@ impl std::error::Error for CliError {
             CliError::Import(source) => Some(source),
             CliError::Csv(source) => Some(source),
             CliError::Odb(source) => Some(source),
+            CliError::IdAllocation { source } => Some(source),
             _ => None,
         }
     }
@@ -77,6 +77,12 @@ impl From<std::io::Error> for CliError {
 impl From<ImportError> for CliError {
     fn from(source: ImportError) -> CliError {
         CliError::Import(source)
+    }
+}
+
+impl From<IdAllocationError> for CliError {
+    fn from(source: IdAllocationError) -> CliError {
+        CliError::IdAllocation { source }
     }
 }
 

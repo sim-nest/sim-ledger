@@ -4,6 +4,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::{error, fmt};
 
 const MANIFEST_FILE: &str = "ledger-set.toml";
 const YEARS_DIR: &str = "years";
@@ -29,6 +30,59 @@ pub struct LedgerSet {
     /// Loaded manifest for the set.
     pub manifest: SetManifest,
 }
+
+/// Failure while reserving canonical ids from a ledger-set manifest.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IdAllocationError {
+    /// The caller requested a negative number of ids.
+    NegativeCount {
+        /// Row family being allocated.
+        row_kind: &'static str,
+        /// Requested count.
+        count: i64,
+    },
+    /// The manifest cursor is negative and cannot produce canonical ids.
+    NegativeCursor {
+        /// Row family being allocated.
+        row_kind: &'static str,
+        /// Current manifest cursor.
+        start: i64,
+    },
+    /// The requested range would overflow `i64`.
+    CursorOverflow {
+        /// Row family being allocated.
+        row_kind: &'static str,
+        /// Current manifest cursor.
+        start: i64,
+        /// Requested count.
+        count: i64,
+    },
+}
+
+impl fmt::Display for IdAllocationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IdAllocationError::NegativeCount { row_kind, count } => {
+                write!(f, "{row_kind} id reservation count {count} is negative")
+            }
+            IdAllocationError::NegativeCursor { row_kind, start } => {
+                write!(f, "{row_kind} id cursor {start} is negative")
+            }
+            IdAllocationError::CursorOverflow {
+                row_kind,
+                start,
+                count,
+            } => {
+                write!(
+                    f,
+                    "{row_kind} id range starting at {start} with count {count} overflows i64"
+                )
+            }
+        }
+    }
+}
+
+impl error::Error for IdAllocationError {}
 
 impl LedgerSet {
     /// Create a new ledger set directory with an empty manifest.
@@ -70,15 +124,13 @@ impl LedgerSet {
     }
 
     /// Reserve `n` voucher ids and advance the set cursor.
-    #[must_use]
-    pub fn alloc_voucher_ids(&mut self, n: i64) -> Range<i64> {
-        reserve_ids(&mut self.manifest.next_voucher_id, n)
+    pub fn alloc_voucher_ids(&mut self, n: i64) -> Result<Range<i64>, IdAllocationError> {
+        reserve_ids("voucher", &mut self.manifest.next_voucher_id, n)
     }
 
     /// Reserve `n` posting ids and advance the set cursor.
-    #[must_use]
-    pub fn alloc_posting_ids(&mut self, n: i64) -> Range<i64> {
-        reserve_ids(&mut self.manifest.next_posting_id, n)
+    pub fn alloc_posting_ids(&mut self, n: i64) -> Result<Range<i64>, IdAllocationError> {
+        reserve_ids("posting", &mut self.manifest.next_posting_id, n)
     }
 
     fn write_manifest(&self, create_new: bool) -> io::Result<()> {
@@ -93,14 +145,27 @@ impl LedgerSet {
     }
 }
 
-fn reserve_ids(cursor: &mut i64, n: i64) -> Range<i64> {
-    assert!(n >= 0, "id reservation count must be non-negative");
+fn reserve_ids(
+    row_kind: &'static str,
+    cursor: &mut i64,
+    n: i64,
+) -> Result<Range<i64>, IdAllocationError> {
+    if n < 0 {
+        return Err(IdAllocationError::NegativeCount { row_kind, count: n });
+    }
     let start = *cursor;
+    if start < 0 {
+        return Err(IdAllocationError::NegativeCursor { row_kind, start });
+    }
     let end = start
         .checked_add(n)
-        .expect("id reservation must not overflow i64");
+        .ok_or(IdAllocationError::CursorOverflow {
+            row_kind,
+            start,
+            count: n,
+        })?;
     *cursor = end;
-    start..end
+    Ok(start..end)
 }
 
 fn invalid_manifest<E>(err: E) -> io::Error
@@ -119,8 +184,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
 
-        assert_eq!(set.alloc_voucher_ids(2), 1..3);
-        assert_eq!(set.alloc_posting_ids(3), 1..4);
+        assert_eq!(set.alloc_voucher_ids(2).unwrap(), 1..3);
+        assert_eq!(set.alloc_posting_ids(3).unwrap(), 1..4);
         set.manifest.years.push(2022);
         set.save().unwrap();
 
@@ -133,5 +198,62 @@ mod tests {
             reloaded.year_path(2022),
             dir.path().join("years/2022.sqlite")
         );
+    }
+
+    #[test]
+    fn allocators_reject_negative_counts_without_mutating_cursor() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
+        let before = set.manifest.clone();
+
+        let err = set.alloc_voucher_ids(-1).unwrap_err();
+
+        assert_eq!(
+            err,
+            IdAllocationError::NegativeCount {
+                row_kind: "voucher",
+                count: -1,
+            }
+        );
+        assert_eq!(set.manifest, before);
+    }
+
+    #[test]
+    fn allocators_reject_negative_cursors_without_mutating_cursor() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
+        set.manifest.next_voucher_id = -4;
+        let before = set.manifest.clone();
+
+        let err = set.alloc_voucher_ids(1).unwrap_err();
+
+        assert_eq!(
+            err,
+            IdAllocationError::NegativeCursor {
+                row_kind: "voucher",
+                start: -4,
+            }
+        );
+        assert_eq!(set.manifest, before);
+    }
+
+    #[test]
+    fn allocators_reject_overflow_without_mutating_cursor() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
+        set.manifest.next_posting_id = i64::MAX;
+        let before = set.manifest.clone();
+
+        let err = set.alloc_posting_ids(1).unwrap_err();
+
+        assert_eq!(
+            err,
+            IdAllocationError::CursorOverflow {
+                row_kind: "posting",
+                start: i64::MAX,
+                count: 1,
+            }
+        );
+        assert_eq!(set.manifest, before);
     }
 }

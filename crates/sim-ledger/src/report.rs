@@ -248,8 +248,8 @@ mod tests {
         credit_account: i64,
         minor: i64,
     ) -> BTreeSet<i64> {
-        let voucher_id = set.alloc_voucher_ids(1).start;
-        let posting_ids: Vec<i64> = set.alloc_posting_ids(2).collect();
+        let voucher_id = set.alloc_voucher_ids(1).unwrap().start;
+        let posting_ids: Vec<i64> = set.alloc_posting_ids(2).unwrap().collect();
         let store = YearStore::create(&set.year_path(year), year).unwrap();
         store
             .insert_account(&account(debit_account, "Asset", Some(1000), None))
