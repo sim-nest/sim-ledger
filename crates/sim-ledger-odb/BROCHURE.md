@@ -14,4 +14,4 @@ In one line: bring LibreOffice Base bookkeeping exports into the ledger model wi
 
 ## Where it fits
 
-This crate is the bridge from a LibreOffice Base file to `sim-ledger`. It handles file-shape details and leaves storage, reports, and SIM-facing surfaces to the core ledger crate and later integration layers.
+This crate is the bridge from a LibreOffice Base file to `sim-ledger`. It handles file-shape details and leaves storage, reports, and SIM-facing surfaces to the core ledger crate and surrounding integration crates.
