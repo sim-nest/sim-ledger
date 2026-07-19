@@ -10,6 +10,7 @@
 - [ ] `cargo doc --workspace --no-deps` passes
 - [ ] `cargo clippy --workspace --all-features --all-targets -- -D warnings` passes
 - [ ] `cargo test --workspace --all-features` passes
+- [ ] `cargo run -p xtask -- check-orphan-crates` passes
 - [ ] `cargo run -p xtask -- simdoc --check` passes
 - [ ] Tests added/updated for the behavior changed
 - [ ] Source and Markdown are ASCII-only

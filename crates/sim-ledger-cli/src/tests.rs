@@ -2,6 +2,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
 
+use sim_ledger::{Account, Amount, LedgerSet, Posting, Voucher, YearStore};
 use sim_ledger_odb::{Cell, ColType, try_write_cell};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
@@ -42,6 +43,96 @@ fn csv_loop_imports_years_and_reports() {
     let (code, out, err) = run_command(["report", path(&set_dir), "--year", "2024", "--by", "sru"]);
     assert_eq!(code, 0, "{err}");
     assert_eq!(out, "SRU BALANCE\n1000 12.00\n3000 -12.00\n");
+}
+
+#[test]
+fn close_statements_and_sru_compare_are_reachable_from_cli() {
+    let temp = tempfile::tempdir().unwrap();
+    let set_dir = temp.path().join("books");
+    let csv_dir = temp.path().join("csv");
+    fs::create_dir(&csv_dir).unwrap();
+    write_csv_export(&csv_dir, TRANS_BALANCED);
+
+    let (code, _, err) = run_command(["new", path(&set_dir), "--label", "Personal"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, _, err) = run_command([
+        "import",
+        path(&set_dir),
+        "--csv",
+        path(&csv_dir),
+        "--year",
+        "2024",
+    ]);
+    assert_eq!(code, 0, "{err}");
+
+    let (code, out, err) = run_command(["statements", path(&set_dir), "--year", "2024"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, expected_statements());
+
+    let (code, out, err) = run_command(["sru-compare", path(&set_dir), "--years", "2024"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, "SRU 2024\n1000 12.00\n3000 -12.00\n");
+
+    let (code, out, err) = run_command(["close", path(&set_dir), "--year", "2024"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, format!("closed 2024\n{}", expected_statements()));
+    assert!(
+        YearStore::open(&LedgerSet::open(&set_dir).unwrap().year_path(2024))
+            .unwrap()
+            .is_closed()
+            .unwrap()
+    );
+}
+
+#[test]
+fn close_and_statements_reject_unbalanced_vouchers() {
+    let temp = tempfile::tempdir().unwrap();
+    let set_dir = temp.path().join("books");
+    write_unbalanced_set(&set_dir);
+
+    let (code, _, err) = run_command(["statements", path(&set_dir), "--year", "2024"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("voucher 1 has 2 postings"), "{err}");
+    assert!(err.contains("unbalanced by 1 minor units"), "{err}");
+
+    let (code, _, err) = run_command(["close", path(&set_dir), "--year", "2024"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("voucher 1 has 2 postings"), "{err}");
+    assert!(err.contains("unbalanced by 1 minor units"), "{err}");
+}
+
+#[test]
+fn draft_check_uses_books_validator() {
+    let (code, out, err) = run_command([
+        "draft-check",
+        "--date",
+        "2024-01-31",
+        "--text",
+        "Receipt",
+        "--posting",
+        "1910:12.00",
+        "--posting",
+        "3010:-12.00",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, "journal draft 2024-01-31 is balanced: 2 postings\n");
+
+    let (code, _, err) = run_command([
+        "draft-check",
+        "--date",
+        "2024-01-31",
+        "--text",
+        "Receipt",
+        "--posting",
+        "1910:12.00",
+        "--posting",
+        "3010:-11.99",
+    ]);
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("journal draft is unbalanced by 1 minor units"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -149,6 +240,74 @@ fn run_command<const N: usize>(args: [&str; N]) -> (i32, String, String) {
 
 fn path(path: &Path) -> &str {
     path.to_str().unwrap()
+}
+
+fn expected_statements() -> &'static str {
+    "\
+YEAR 2024
+TRIAL BALANCE
+ACCOUNT OPENING DEBIT CREDIT CLOSING SRU
+1910 0.00 12.00 0.00 12.00 1000
+3010 0.00 0.00 12.00 -12.00 3000
+INCOME STATEMENT
+SRU 3000 -12.00
+TOTAL -12.00
+BALANCE SHEET
+SRU 1000 12.00
+TOTAL 12.00
+NOTES
+basis Amounts are signed exact minor units from the ledger year.
+"
+}
+
+fn write_unbalanced_set(set_dir: &Path) {
+    let mut set = LedgerSet::create(set_dir, "Personal").unwrap();
+    let store = YearStore::create(&set.year_path(2024), 2024).unwrap();
+    store
+        .insert_account(&account(1910, "Cash", Some(1000), None))
+        .unwrap();
+    store
+        .insert_account(&account(3010, "Sales", None, Some(3000)))
+        .unwrap();
+    store
+        .insert_voucher(&Voucher {
+            id: 1,
+            source_id: Some(11612),
+            date: "2024-01-31".to_owned(),
+            text: Some("Receipt".to_owned()),
+        })
+        .unwrap();
+    store
+        .insert_posting(&posting(1, 1910, Amount(1_200), "Debit"))
+        .unwrap();
+    store
+        .insert_posting(&posting(2, 3010, Amount(-1_199), "Credit"))
+        .unwrap();
+    store.set_id_state("voucher", 2).unwrap();
+    store.set_id_state("posting", 3).unwrap();
+    set.manifest.years.push(2024);
+    set.save().unwrap();
+}
+
+fn account(number: i64, name: &str, sru_plus: Option<i32>, sru_minus: Option<i32>) -> Account {
+    Account {
+        number,
+        name: name.to_owned(),
+        note: None,
+        sru_plus,
+        sru_minus,
+    }
+}
+
+fn posting(id: i64, account: i64, amount: Amount, text: &str) -> Posting {
+    Posting {
+        id,
+        source_id: Some(id + 25_470),
+        voucher_id: 1,
+        account,
+        amount,
+        text: Some(text.to_owned()),
+    }
 }
 
 fn write_csv_export(dir: &Path, trans: &str) {

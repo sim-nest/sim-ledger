@@ -3,10 +3,17 @@ use std::io::Write;
 use std::num::TryFromIntError;
 use std::path::Path;
 
-use sim_ledger::{BalanceKey, BalanceRow, LedgerSet, SourceYear, balances, import_year};
+use sim_ledger::{
+    Amount, BalanceKey, BalanceRow, LedgerSet, Posting, SourceYear, balances, import_year,
+};
 use sim_ledger_odb::{load_csv, parse_script, read_odb_for_year};
+use sim_lib_ledger_books::{JournalDraft, validate_draft};
+use sim_lib_ledger_close::{
+    FinancialStatements, StatementTable, TrialBalanceRow, close_year, compare_by_sru,
+    financial_statements,
+};
 
-use crate::args::{Command, ImportSource, ReportGroup, YearSelection};
+use crate::args::{Command, DraftPosting, ImportSource, ReportGroup, YearSelection};
 use crate::error::CliError;
 
 pub(crate) fn execute(command: Command, out: &mut dyn Write) -> Result<(), CliError> {
@@ -23,6 +30,14 @@ pub(crate) fn execute(command: Command, out: &mut dyn Write) -> Result<(), CliEr
             years,
             group,
         } => report(&set_dir, years, group, out),
+        Command::Close { set_dir, year } => close(&set_dir, year, out),
+        Command::Statements { set_dir, year } => statements(&set_dir, year, out),
+        Command::SruCompare { set_dir, years } => sru_compare(&set_dir, &years, out),
+        Command::DraftCheck {
+            date,
+            text,
+            postings,
+        } => draft_check(date, text, postings, out),
     }
 }
 
@@ -128,6 +143,131 @@ fn write_sru_report(rows: &[BalanceRow], out: &mut dyn Write) -> Result<(), CliE
             writeln!(out, "{code} {}", row.amount)?;
         }
     }
+    Ok(())
+}
+
+fn close(set_dir: &Path, year: i32, out: &mut dyn Write) -> Result<(), CliError> {
+    let mut set = LedgerSet::open(set_dir)?;
+    let statements = close_year(&mut set, year)?;
+    writeln!(out, "closed {year}")?;
+    write_financial_statements(&statements, out)
+}
+
+fn statements(set_dir: &Path, year: i32, out: &mut dyn Write) -> Result<(), CliError> {
+    let set = LedgerSet::open(set_dir)?;
+    let statements = financial_statements(&set, year)?;
+    write_financial_statements(&statements, out)
+}
+
+fn sru_compare(set_dir: &Path, years: &[i32], out: &mut dyn Write) -> Result<(), CliError> {
+    let set = LedgerSet::open(set_dir)?;
+    writeln!(
+        out,
+        "SRU {}",
+        years
+            .iter()
+            .map(i32::to_string)
+            .collect::<Vec<_>>()
+            .join(" ")
+    )?;
+    for row in compare_by_sru(&set, years)? {
+        write!(out, "{}", row.sru)?;
+        for amount in row.years {
+            write!(out, " {}", Amount(amount.amount_minor))?;
+        }
+        writeln!(out)?;
+    }
+    Ok(())
+}
+
+fn draft_check(
+    date: time::Date,
+    text: String,
+    postings: Vec<DraftPosting>,
+    out: &mut dyn Write,
+) -> Result<(), CliError> {
+    let posting_count = postings.len();
+    let draft = JournalDraft {
+        date,
+        text,
+        postings: draft_postings(postings)?,
+        evidence: Vec::new(),
+    };
+    validate_draft(&draft)?;
+    writeln!(
+        out,
+        "journal draft {} is balanced: {posting_count} postings",
+        draft.date
+    )?;
+    Ok(())
+}
+
+fn draft_postings(postings: Vec<DraftPosting>) -> Result<Vec<Posting>, CliError> {
+    postings
+        .into_iter()
+        .enumerate()
+        .map(|(index, posting)| {
+            let count = index + 1;
+            let id =
+                i64::try_from(count).map_err(|_: TryFromIntError| CliError::CountOverflow {
+                    row_kind: "posting",
+                    count,
+                })?;
+            Ok(Posting {
+                id,
+                source_id: None,
+                voucher_id: 1,
+                account: posting.account,
+                amount: posting.amount,
+                text: None,
+            })
+        })
+        .collect()
+}
+
+fn write_financial_statements(
+    statements: &FinancialStatements,
+    out: &mut dyn Write,
+) -> Result<(), CliError> {
+    writeln!(out, "YEAR {}", statements.year)?;
+    write_trial_balance(&statements.trial_balance, out)?;
+    write_statement_table(&statements.income_statement, out)?;
+    write_statement_table(&statements.balance_sheet, out)?;
+    writeln!(out, "NOTES")?;
+    for note in &statements.notes {
+        writeln!(out, "{} {}", note.id, note.text)?;
+    }
+    Ok(())
+}
+
+fn write_trial_balance(rows: &[TrialBalanceRow], out: &mut dyn Write) -> Result<(), CliError> {
+    writeln!(out, "TRIAL BALANCE")?;
+    writeln!(out, "ACCOUNT OPENING DEBIT CREDIT CLOSING SRU")?;
+    for row in rows {
+        let sru = row
+            .closing_sru()
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "-".to_owned());
+        writeln!(
+            out,
+            "{} {} {} {} {} {}",
+            row.account,
+            Amount(row.opening_minor),
+            Amount(row.debit_minor),
+            Amount(row.credit_minor),
+            Amount(row.closing_minor),
+            sru
+        )?;
+    }
+    Ok(())
+}
+
+fn write_statement_table(table: &StatementTable, out: &mut dyn Write) -> Result<(), CliError> {
+    writeln!(out, "{}", table.title.to_ascii_uppercase())?;
+    for row in &table.rows {
+        writeln!(out, "{} {}", row.label, Amount(row.amount_minor))?;
+    }
+    writeln!(out, "TOTAL {}", Amount(table.total_minor()?))?;
     Ok(())
 }
 

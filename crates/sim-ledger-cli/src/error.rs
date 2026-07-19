@@ -3,12 +3,16 @@ use std::path::PathBuf;
 
 use sim_ledger::{IdAllocationError, ImportError};
 use sim_ledger_odb::{CsvLoadError, OdbError};
+use sim_lib_ledger_books::BooksError;
+use sim_lib_ledger_close::CloseError;
 
 #[derive(Debug)]
 pub(crate) enum CliError {
     Io(std::io::Error),
     Report(String),
     Import(ImportError),
+    Close(CloseError),
+    Books(BooksError),
     Csv(CsvLoadError),
     Odb(OdbError),
     CsvScriptMissing {
@@ -37,6 +41,8 @@ impl fmt::Display for CliError {
                 "import rejected: voucher {voucher} has {posting_count} postings and is unbalanced by {minor_sum} minor units"
             ),
             CliError::Import(source) => write!(f, "{source}"),
+            CliError::Close(source) => write!(f, "{source}"),
+            CliError::Books(source) => write!(f, "{source}"),
             CliError::Csv(source) => write!(f, "{source}"),
             CliError::Odb(source) => write!(f, "{source}"),
             CliError::CsvScriptMissing { dir } => write!(
@@ -60,6 +66,8 @@ impl std::error::Error for CliError {
             CliError::Io(source) => Some(source),
             CliError::Report(_) => None,
             CliError::Import(source) => Some(source),
+            CliError::Close(source) => Some(source),
+            CliError::Books(source) => Some(source),
             CliError::Csv(source) => Some(source),
             CliError::Odb(source) => Some(source),
             CliError::IdAllocation { source } => Some(source),
@@ -77,6 +85,18 @@ impl From<std::io::Error> for CliError {
 impl From<ImportError> for CliError {
     fn from(source: ImportError) -> CliError {
         CliError::Import(source)
+    }
+}
+
+impl From<CloseError> for CliError {
+    fn from(source: CloseError) -> CliError {
+        CliError::Close(source)
+    }
+}
+
+impl From<BooksError> for CliError {
+    fn from(source: BooksError) -> CliError {
+        CliError::Books(source)
     }
 }
 
