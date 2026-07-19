@@ -3,7 +3,7 @@
   "package_count": 6,
   "packages": [
     {
-      "description": "Command line imports and reports for sim-ledger sets.",
+      "description": "Command line imports, reports, close, and draft checks for sim-ledger sets.",
       "generated_readme": false,
       "manifest": "crates/sim-ledger-cli/Cargo.toml",
       "name": "sim-ledger-cli",

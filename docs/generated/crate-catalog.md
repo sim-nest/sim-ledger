@@ -6,7 +6,7 @@ Generated from Cargo metadata by `xtask crate-catalog v1`.
 
 | Package | Publish | Targets | Description |
 | --- | --- | --- | --- |
-| `sim-ledger-cli` | `false` | `bin, lib` | Command line imports and reports for sim-ledger sets. |
+| `sim-ledger-cli` | `false` | `bin, lib` | Command line imports, reports, close, and draft checks for sim-ledger sets. |
 | `sim-ledger-odb` | `false` | `lib` | LibreOffice Base ODB helpers for sim-ledger imports. |
 | `sim-ledger` | `false` | `lib` | Yearly ledger records and exact amount helpers. |
 | `sim-lib-ledger-books` | `false` | `lib` | Bookkeeping journal drafts and profile data for sim-ledger. |
