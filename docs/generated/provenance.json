@@ -3,10 +3,10 @@
   "generated_by": "cargo run -p xtask -- simdoc",
   "generation_timestamp": "2026-07-15T01:30:21+02:00",
   "generator": "xtask repo-contract v1",
-  "git_commit": "0ed71cf18c2a9666f59e1c4f220d568e488b4e9a",
+  "git_commit": "0e674cb99dd544a95d33dd7b1246615b61ebe8d8",
   "repo": "sim-ledger",
   "schema": "sim.provenance.v1",
-  "source_commit": "0ed71cf18c2a9666f59e1c4f220d568e488b4e9a",
+  "source_commit": "0e674cb99dd544a95d33dd7b1246615b61ebe8d8",
   "source_remote": "https://github.com/sim-nest/sim-ledger",
   "validation_commands": [
     "cargo fmt --all --check",
@@ -19,9 +19,9 @@
     "cargo run -p xtask -- validation-matrix --check --repo .",
     "cargo run -p xtask -- crate-catalog --check --repo ."
   ],
-  "workspace_hash": "4d01a0b45fccfef4",
+  "workspace_hash": "d3a4f044a3c28d32",
   "workspace_hash_algorithm": "fnv1a64",
-  "workspace_hash_input_count": 43,
+  "workspace_hash_input_count": 44,
   "workspace_hash_inputs": [
     "Cargo.toml",
     "crates/sim-ledger/Cargo.toml",
@@ -65,6 +65,7 @@
     "crates/sim-lib-ledger-close/src/statements.rs",
     "crates/sim-lib-ledger-close/src/tests.rs",
     "crates/sim-lib-ledger-close/src/trial_balance.rs",
+    "features.toml",
     "xtask/Cargo.toml"
   ]
 }

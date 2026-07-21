@@ -1,0 +1,56 @@
+schema = "sim.features"
+
+[enforcement.audience]
+user = "strict"
+code = "advisory"
+framework = "advisory"
+
+[enforcement.surface]
+cli = "strict"
+docs = "advisory"
+
+[enforcement.route]
+major_entrypoints = "advisory"
+frameworks = "advisory"
+
+[[feature]]
+id = "feature/sim-ledger/generated-docs"
+title = "Repository documentation surface"
+summary = "Publish generated package, card, recipe, and index facts for the ledger crates."
+owner = "crate/xtask"
+audiences = ["code"]
+guidance = "Use this row when checking the generated documentation and index lane for the ledger repo."
+claims_anchors = [
+  "anchor/cli/xtask",
+  "anchor/doc/generated/feature-map",
+  "anchor/doc/generated/sim-index-fragment",
+]
+claims_surfaces = [
+  "cli/xtask",
+  "docs/sim-ledger/generated",
+]
+
+[[feature]]
+id = "feature/sim-ledger/ledger-command"
+title = "Ledger command surface"
+summary = "Run ledger import, drafting, trial balance, and closing flows through the checked command package."
+owner = "crate/sim-ledger-cli"
+audiences = ["user", "code"]
+guidance = "Use this row when starting from the ledger command or tracing it back to the ledger crates."
+claims_anchors = [
+  "anchor/cli/sim-ledger-cli",
+  "anchor/rustdoc/sim-ledger-cli/crate-root",
+  "anchor/rustdoc/sim-ledger-cli/run",
+]
+claims_surfaces = [
+  "cli/sim-ledger-cli",
+]
+
+[[route]]
+id = "route/prepare-balanced-ledger"
+task = "Prepare a balanced ledger"
+audiences = ["user", "code"]
+steps = [
+  { feature = "feature/sim-ledger/ledger-command", why = "The command row owns the operational entry point." },
+  { specimen = "recipe/sim-ledger/crates/sim-ledger/01-basics/balanced-year", why = "The balanced-year recipe shows the expected yearly voucher shape." },
+]
