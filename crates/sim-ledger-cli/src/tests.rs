@@ -9,6 +9,8 @@ use zip::{CompressionMethod, ZipWriter};
 
 use super::run;
 
+// conformance: ledger command surface imports, reports, drafts, and closes books.
+
 #[test]
 fn csv_loop_imports_years_and_reports() {
     let temp = tempfile::tempdir().unwrap();

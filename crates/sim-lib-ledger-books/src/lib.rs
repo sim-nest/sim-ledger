@@ -142,6 +142,8 @@ mod tests {
 
     use super::*;
 
+    // conformance: ledger libraries validate journal drafts and evidence links.
+
     #[test]
     fn balanced_draft_validates() {
         let draft = draft(vec![posting(100), posting(-100)]);
