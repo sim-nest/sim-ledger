@@ -19,6 +19,7 @@ This generated lane consumes `docs/generated/sim-index-fragment.sx`. Global inde
 | --- | --- | ---: | --- |
 | `feature/sim-ledger/generated-docs` | `crate/xtask` | 0 | Publish generated package, card, recipe, and index facts for the ledger crates. |
 | `feature/sim-ledger/ledger-command` | `crate/sim-ledger-cli` | 0 | Run ledger import, drafting, trial balance, and closing flows through the checked command package. |
+| `feature/sim-ledger/ledger-libraries` | `crate/sim-ledger` | 0 | Provide voucher storage, book construction, and closing libraries for ledger workflows. |
 
 ## Surfaces
 

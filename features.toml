@@ -2,7 +2,7 @@ schema = "sim.features"
 
 [enforcement.audience]
 user = "strict"
-code = "advisory"
+code = "strict"
 framework = "advisory"
 
 [enforcement.surface]
@@ -22,6 +22,7 @@ audiences = ["code"]
 guidance = "Use this row when checking the generated documentation and index lane for the ledger repo."
 claims_anchors = [
   "anchor/cli/xtask",
+  "anchor/crate/xtask",
   "anchor/doc/generated/feature-map",
   "anchor/doc/generated/sim-index-fragment",
 ]
@@ -39,11 +40,29 @@ audiences = ["user", "code"]
 guidance = "Use this row when starting from the ledger command or tracing it back to the ledger crates."
 claims_anchors = [
   "anchor/cli/sim-ledger-cli",
+  "anchor/crate/sim-ledger-cli",
   "anchor/rustdoc/sim-ledger-cli/crate-root",
   "anchor/rustdoc/sim-ledger-cli/run",
 ]
 claims_surfaces = [
   "cli/sim-ledger-cli",
+]
+supports = [
+  "feature/sim-ledger/ledger-libraries",
+]
+
+[[feature]]
+id = "feature/sim-ledger/ledger-libraries"
+title = "Ledger libraries"
+summary = "Provide voucher storage, book construction, and closing libraries for ledger workflows."
+owner = "crate/sim-ledger"
+audiences = ["code", "framework"]
+guidance = "Use this row when tracing ledger command behavior to reusable ledger packages."
+claims_anchors = [
+  "anchor/crate/sim-ledger",
+  "anchor/crate/sim-ledger-odb",
+  "anchor/crate/sim-lib-ledger-books",
+  "anchor/crate/sim-lib-ledger-close",
 ]
 
 [[route]]
