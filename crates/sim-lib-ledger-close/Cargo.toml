@@ -1,0 +1,20 @@
+[package]
+name = "sim-lib-ledger-close"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+description = "Fiscal-year close and financial statement helpers for sim-ledger."
+readme = "README.md"
+publish = false
+repository = "https://github.com/sim-nest/sim-ledger"
+homepage = "https://github.com/sim-nest/sim-ledger"
+
+[dependencies]
+rusqlite = "0.31"
+sim-ledger = { version = "0.1.0", path = "../sim-ledger" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

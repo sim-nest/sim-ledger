@@ -7,6 +7,28 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+#[cfg(feature = "sim")]
+pub mod codec;
+pub mod cookbook;
+pub mod import;
 pub mod model;
+pub mod report;
+pub mod set;
+pub mod store;
 
-pub use model::{Account, Amount, Posting, Voucher, YearData, is_balanced};
+#[cfg(test)]
+mod import_tests;
+
+#[cfg(feature = "sim")]
+pub use codec::{
+    BalancesCall, LedgerCodecError, balances_call_from_expr, balances_query_expr, report_to_expr,
+};
+pub use cookbook::{BalancedYearDemo, CookbookAccountBalance, balanced_year_demo};
+pub use import::{ImportError, SourcePosting, SourceVoucher, SourceYear, import_year};
+pub use model::{
+    Account, Amount, BalanceError, Posting, Voucher, VoucherBalanceViolation, YearData,
+    is_balanced, is_voucher_balanced, voucher_balance_violations,
+};
+pub use report::{BalanceKey, BalanceRow, balances};
+pub use set::{IdAllocationError, LedgerSet, SetManifest};
+pub use store::YearStore;

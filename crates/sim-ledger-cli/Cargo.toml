@@ -1,0 +1,28 @@
+[package]
+name = "sim-ledger-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+description = "Command line imports, reports, close, and draft checks for sim-ledger sets."
+readme = "README.md"
+publish = false
+repository = "https://github.com/sim-nest/sim-ledger"
+homepage = "https://github.com/sim-nest/sim-ledger"
+
+[[bin]]
+name = "ledger"
+path = "src/main.rs"
+
+[dependencies]
+sim-ledger = { version = "0.1.0", path = "../sim-ledger" }
+sim-lib-ledger-books = { version = "0.1.0", path = "../sim-lib-ledger-books" }
+sim-lib-ledger-close = { version = "0.1.0", path = "../sim-lib-ledger-close" }
+sim-ledger-odb = { version = "0.1.0", path = "../sim-ledger-odb" }
+time = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true

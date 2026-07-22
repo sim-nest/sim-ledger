@@ -1,0 +1,5 @@
+book = "ledger/core"
+title = "Ledger Core"
+summary = "Exact yearly ledger records and balance checks."
+order = 320
+chapters = ["01-basics"]

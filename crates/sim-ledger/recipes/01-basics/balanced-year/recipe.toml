@@ -1,0 +1,8 @@
+id = "balanced-year"
+title = "Balanced yearly voucher"
+codec = "lisp"
+setup = "setup.siml"
+purpose = "purpose.md"
+order = 10
+tags = ["ledger", "year", "voucher", "balance", "sandbox-descriptor"]
+requires = ["ledger/core", "codec/lisp"]

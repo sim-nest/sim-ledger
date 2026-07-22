@@ -1,5 +1,49 @@
 {
-  "schema": "sim.feature-map.v1",
-  "repo": "sim-ledger",
-  "packages": []
+  "generator": "xtask repo-contract v1",
+  "packages": [
+    {
+      "features": [
+        {
+          "edges": [],
+          "name": "default",
+          "workspace_edges": []
+        },
+        {
+          "edges": [
+            "dep:sim-codec",
+            "dep:sim-kernel"
+          ],
+          "name": "sim",
+          "workspace_edges": []
+        }
+      ],
+      "group": "workspace",
+      "package": "sim-ledger"
+    },
+    {
+      "features": [],
+      "group": "workspace",
+      "package": "sim-ledger-cli"
+    },
+    {
+      "features": [],
+      "group": "workspace",
+      "package": "sim-ledger-odb"
+    },
+    {
+      "features": [],
+      "group": "workspace",
+      "package": "sim-lib-ledger-books"
+    },
+    {
+      "features": [],
+      "group": "workspace",
+      "package": "sim-lib-ledger-close"
+    },
+    {
+      "features": [],
+      "group": "workspace",
+      "package": "xtask"
+    }
+  ]
 }

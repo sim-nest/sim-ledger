@@ -1,0 +1,13 @@
+id = "test-local"
+
+[[vat_rates]]
+code = "standard"
+percent = "25.00"
+
+[[vat_rates]]
+code = "reduced"
+percent = "12.00"
+
+[[vat_rates]]
+code = "zero"
+percent = "0.00"

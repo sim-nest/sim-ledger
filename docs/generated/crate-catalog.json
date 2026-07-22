@@ -1,7 +1,32 @@
 {
   "generator": "xtask crate-catalog v1",
-  "package_count": 2,
+  "package_count": 6,
   "packages": [
+    {
+      "description": "Command line imports, reports, close, and draft checks for sim-ledger sets.",
+      "generated_readme": false,
+      "manifest": "crates/sim-ledger-cli/Cargo.toml",
+      "name": "sim-ledger-cli",
+      "publish": "false",
+      "readme": "crates/sim-ledger-cli/README.md",
+      "root": "crates/sim-ledger-cli",
+      "target_kinds": [
+        "bin",
+        "lib"
+      ]
+    },
+    {
+      "description": "LibreOffice Base ODB helpers for sim-ledger imports.",
+      "generated_readme": false,
+      "manifest": "crates/sim-ledger-odb/Cargo.toml",
+      "name": "sim-ledger-odb",
+      "publish": "false",
+      "readme": "crates/sim-ledger-odb/README.md",
+      "root": "crates/sim-ledger-odb",
+      "target_kinds": [
+        "lib"
+      ]
+    },
     {
       "description": "Yearly ledger records and exact amount helpers.",
       "generated_readme": false,
@@ -10,6 +35,30 @@
       "publish": "false",
       "readme": "crates/sim-ledger/README.md",
       "root": "crates/sim-ledger",
+      "target_kinds": [
+        "lib"
+      ]
+    },
+    {
+      "description": "Bookkeeping journal drafts and profile data for sim-ledger.",
+      "generated_readme": false,
+      "manifest": "crates/sim-lib-ledger-books/Cargo.toml",
+      "name": "sim-lib-ledger-books",
+      "publish": "false",
+      "readme": "crates/sim-lib-ledger-books/README.md",
+      "root": "crates/sim-lib-ledger-books",
+      "target_kinds": [
+        "lib"
+      ]
+    },
+    {
+      "description": "Fiscal-year close and financial statement helpers for sim-ledger.",
+      "generated_readme": false,
+      "manifest": "crates/sim-lib-ledger-close/Cargo.toml",
+      "name": "sim-lib-ledger-close",
+      "publish": "false",
+      "readme": "crates/sim-lib-ledger-close/README.md",
+      "root": "crates/sim-lib-ledger-close",
       "target_kinds": [
         "lib"
       ]

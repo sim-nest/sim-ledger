@@ -1,5 +1,6 @@
 //! Ledger records and exact fixed-decimal amount handling.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 /// Exact money as a signed count of minor units (hundredths). "1234.56" -> 123456.
@@ -156,10 +157,93 @@ pub struct YearData {
     pub postings: Vec<Posting>,
 }
 
-/// Double-entry: a voucher's postings must sum to exactly zero.
+/// A voucher whose posting lines do not satisfy double-entry balance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VoucherBalanceViolation {
+    /// Canonical voucher id.
+    pub voucher_id: i64,
+    /// Number of posting lines attached to the voucher.
+    pub posting_count: usize,
+    /// Signed minor-unit sum for the voucher.
+    pub minor_sum: i64,
+}
+
+/// Failure while checking exact voucher balances.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BalanceError {
+    /// A voucher's posting sum overflowed the supported minor-unit range.
+    SumOverflow {
+        /// Canonical voucher id.
+        voucher_id: i64,
+    },
+}
+
+impl fmt::Display for BalanceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SumOverflow { voucher_id } => {
+                write!(f, "voucher {voucher_id} balance overflows minor units")
+            }
+        }
+    }
+}
+
+impl std::error::Error for BalanceError {}
+
+/// Aggregate posting sum check. This is not a voucher-level invariant check.
 #[must_use]
 pub fn is_balanced(postings: &[Posting]) -> bool {
     postings.iter().map(|p| p.amount.0 as i128).sum::<i128>() == 0
+}
+
+/// Return whether one voucher has at least one posting and sums to zero.
+pub fn is_voucher_balanced(voucher_id: i64, postings: &[Posting]) -> Result<bool, BalanceError> {
+    let mut posting_count = 0_usize;
+    let mut minor_sum = 0_i128;
+    for posting in postings
+        .iter()
+        .filter(|posting| posting.voucher_id == voucher_id)
+    {
+        posting_count += 1;
+        minor_sum += i128::from(posting.amount.0);
+    }
+    let minor_sum = checked_minor_sum(voucher_id, minor_sum)?;
+    Ok(posting_count > 0 && minor_sum == 0)
+}
+
+/// Report every voucher with no postings or a nonzero posting sum.
+pub fn voucher_balance_violations(
+    vouchers: &[Voucher],
+    postings: &[Posting],
+) -> Result<Vec<VoucherBalanceViolation>, BalanceError> {
+    let mut balances = vouchers
+        .iter()
+        .map(|voucher| (voucher.id, (0_usize, 0_i128)))
+        .collect::<BTreeMap<_, _>>();
+
+    for posting in postings {
+        if let Some((posting_count, minor_sum)) = balances.get_mut(&posting.voucher_id) {
+            *posting_count += 1;
+            *minor_sum += i128::from(posting.amount.0);
+        }
+    }
+
+    let mut violations = Vec::new();
+    for (voucher_id, (posting_count, minor_sum)) in balances {
+        let minor_sum = checked_minor_sum(voucher_id, minor_sum)?;
+        if posting_count == 0 || minor_sum != 0 {
+            violations.push(VoucherBalanceViolation {
+                voucher_id,
+                posting_count,
+                minor_sum,
+            });
+        }
+    }
+    Ok(violations)
+}
+
+fn checked_minor_sum(voucher_id: i64, minor_sum: i128) -> Result<i64, BalanceError> {
+    i64::try_from(minor_sum).map_err(|_| BalanceError::SumOverflow { voucher_id })
 }
 
 #[cfg(test)]
@@ -197,13 +281,63 @@ mod tests {
         assert!(!is_balanced(&unbalanced));
     }
 
+    #[test]
+    fn reports_voucher_balance_violations() {
+        let vouchers = vec![voucher(1), voucher(2), voucher(3)];
+        let postings = vec![posting_for(1, 100), posting_for(1, -100), posting_for(2, 7)];
+
+        let violations = voucher_balance_violations(&vouchers, &postings).unwrap();
+
+        assert_eq!(
+            violations,
+            vec![
+                VoucherBalanceViolation {
+                    voucher_id: 2,
+                    posting_count: 1,
+                    minor_sum: 7,
+                },
+                VoucherBalanceViolation {
+                    voucher_id: 3,
+                    posting_count: 0,
+                    minor_sum: 0,
+                },
+            ]
+        );
+        assert!(is_voucher_balanced(1, &postings).unwrap());
+        assert!(!is_voucher_balanced(2, &postings).unwrap());
+        assert!(!is_voucher_balanced(3, &postings).unwrap());
+    }
+
+    #[test]
+    fn voucher_balance_detects_minor_unit_overflow() {
+        let vouchers = vec![voucher(1)];
+        let postings = vec![posting_for(1, i64::MAX), posting_for(1, 1)];
+
+        let err = voucher_balance_violations(&vouchers, &postings).unwrap_err();
+
+        assert_eq!(err, BalanceError::SumOverflow { voucher_id: 1 });
+    }
+
     fn posting(amount: i64) -> Posting {
+        posting_for(1, amount)
+    }
+
+    fn posting_for(voucher_id: i64, amount: i64) -> Posting {
         Posting {
             id: amount,
             source_id: None,
-            voucher_id: 1,
+            voucher_id,
             account: 1910,
             amount: Amount(amount),
+            text: None,
+        }
+    }
+
+    fn voucher(id: i64) -> Voucher {
+        Voucher {
+            id,
+            source_id: None,
+            date: "2026-01-01".to_owned(),
             text: None,
         }
     }

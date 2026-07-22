@@ -1,0 +1,19 @@
+[package]
+name = "sim-lib-ledger-books"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+description = "Bookkeeping journal drafts and profile data for sim-ledger."
+readme = "README.md"
+publish = false
+repository = "https://github.com/sim-nest/sim-ledger"
+homepage = "https://github.com/sim-nest/sim-ledger"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sim-ledger = { version = "0.1.0", path = "../sim-ledger" }
+time = { version = "0.3", features = ["serde"] }
+toml = "0.8"
+
+[lints]
+workspace = true

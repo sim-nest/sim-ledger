@@ -2,6 +2,10 @@
 resolver = "3"
 members = [
   "crates/sim-ledger",
+  "crates/sim-ledger-cli",
+  "crates/sim-lib-ledger-books",
+  "crates/sim-lib-ledger-close",
+  "crates/sim-ledger-odb",
   "xtask",
 ]
 
