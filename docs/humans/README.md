@@ -25,6 +25,7 @@ This generated lane consumes `docs/generated/sim-index-fragment.sx`. Global inde
 
 | Surface | Kind | Subject |
 | --- | --- | --- |
+| `cli/ledger` | `cli` | `crate/sim-ledger-cli` |
 | `cli/sim-ledger-cli` | `cli` | `crate/sim-ledger-cli` |
 | `cli/xtask` | `cli` | `crate/xtask` |
 | `docs/sim-ledger/generated` | `docs` | `doc-set/sim-ledger/generated` |

@@ -44,12 +44,14 @@ owner = "crate/sim-ledger-cli"
 audiences = ["user", "code"]
 guidance = "Use this row when starting from the ledger command or tracing it back to the ledger crates."
 claims_anchors = [
+  "anchor/bin/ledger",
   "anchor/cli/sim-ledger-cli",
   "anchor/crate/sim-ledger-cli",
   "anchor/rustdoc/sim-ledger-cli/crate-root",
   "anchor/rustdoc/sim-ledger-cli/run",
 ]
 claims_surfaces = [
+  "cli/ledger",
   "cli/sim-ledger-cli",
 ]
 claims_specimens = [
