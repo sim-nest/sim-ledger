@@ -4,7 +4,18 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// Exact money as a signed count of minor units (hundredths). "1234.56" -> 123456.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+)]
 pub struct Amount(pub i64);
 
 impl Amount {
@@ -100,7 +111,7 @@ impl fmt::Display for Amount {
 
 /// A year-local account (the "konto" row). Numbers are NOT stable across years;
 /// SRU codes bridge years for reporting.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Account {
     /// Account number from the source year.
     pub number: i64,
@@ -115,7 +126,7 @@ pub struct Account {
 }
 
 /// A voucher / verifikation (the "ver" row).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Voucher {
     /// Canonical id, monotonic across years.
     pub id: i64,
@@ -128,7 +139,7 @@ pub struct Voucher {
 }
 
 /// A posting / transaction line (the "trans" row).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Posting {
     /// Canonical id, monotonic across years.
     pub id: i64,
@@ -145,7 +156,7 @@ pub struct Posting {
 }
 
 /// A whole year, ready to persist or imported for further processing.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct YearData {
     /// Ledger year.
     pub year: i32,

@@ -39,23 +39,14 @@ claims_surfaces = [
 [[feature]]
 id = "feature/sim-ledger/ledger-command"
 title = "Ledger command surface"
-summary = "Run ledger import, drafting, trial balance, and closing flows through the checked command package."
+summary = "Run ledger import, drafting, trial balance, and closing flows through the loadable command package with supplied mounts and platform time."
 owner = "crate/sim-ledger-cli"
 audiences = ["user", "code"]
-guidance = "Use this row when starting from the ledger command or tracing it back to the ledger crates."
+guidance = "Load sim-ledger-cli with an explicit CommandContext. Map opaque set/import names to preopened HostDirPort mounts and supply platform wall-clock data; never pass native paths, process environment, or temporary-directory discovery into ledger behavior."
 claims_anchors = [
-  "anchor/bin/ledger",
-  "anchor/cli/sim-ledger-cli",
   "anchor/crate/sim-ledger-cli",
   "anchor/rustdoc/sim-ledger-cli/crate-root",
   "anchor/rustdoc/sim-ledger-cli/run",
-]
-claims_surfaces = [
-  "cli/ledger",
-  "cli/sim-ledger-cli",
-]
-claims_specimens = [
-  "spec-test/sim-ledger/crates/sim-ledger-cli/src/tests",
 ]
 supports = [
   "feature/sim-ledger/ledger-libraries",
@@ -64,10 +55,10 @@ supports = [
 [[feature]]
 id = "feature/sim-ledger/ledger-libraries"
 title = "Ledger libraries"
-summary = "Provide voucher storage, book construction, and closing libraries for ledger workflows."
+summary = "Provide mount-backed voucher storage, exact book construction, and closing libraries for ledger workflows."
 owner = "crate/sim-ledger"
 audiences = ["code", "framework"]
-guidance = "Use this row when tracing ledger command behavior to reusable ledger packages."
+guidance = "Compose LedgerSet and YearStore over the existing sim-storage-port HostDirPort contract. Persistence, imports, reports, ordering, ids, and close state are functions of supplied content; platform crates own native adapters."
 claims_anchors = [
   "anchor/crate/sim-ledger",
   "anchor/crate/sim-ledger-odb",

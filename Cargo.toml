@@ -6,6 +6,7 @@ members = [
   "crates/sim-lib-ledger-books",
   "crates/sim-lib-ledger-close",
   "crates/sim-ledger-odb",
+  "crates/sim-ledger-test-support",
   "xtask",
 ]
 

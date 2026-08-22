@@ -23,6 +23,13 @@
       "summary": "LibreOffice Base import helpers for sim-ledger."
     },
     {
+      "crate_name": "sim_ledger_test_support",
+      "group": "workspace",
+      "manifest": "crates/sim-ledger-test-support/Cargo.toml",
+      "package": "sim-ledger-test-support",
+      "summary": "Deterministic model mount used only by ledger conformance tests."
+    },
+    {
       "crate_name": "sim_lib_ledger_books",
       "group": "workspace",
       "manifest": "crates/sim-lib-ledger-books/Cargo.toml",

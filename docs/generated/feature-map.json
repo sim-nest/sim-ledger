@@ -33,6 +33,11 @@
     {
       "features": [],
       "group": "workspace",
+      "package": "sim-ledger-test-support"
+    },
+    {
+      "features": [],
+      "group": "workspace",
       "package": "sim-lib-ledger-books"
     },
     {

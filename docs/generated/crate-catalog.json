@@ -1,6 +1,6 @@
 {
   "generator": "xtask crate-catalog v1",
-  "package_count": 6,
+  "package_count": 7,
   "packages": [
     {
       "description": "Command line imports, reports, close, and draft checks for sim-ledger sets.",
@@ -11,7 +11,6 @@
       "readme": "crates/sim-ledger-cli/README.md",
       "root": "crates/sim-ledger-cli",
       "target_kinds": [
-        "bin",
         "lib"
       ]
     },
@@ -23,6 +22,18 @@
       "publish": "false",
       "readme": "crates/sim-ledger-odb/README.md",
       "root": "crates/sim-ledger-odb",
+      "target_kinds": [
+        "lib"
+      ]
+    },
+    {
+      "description": "Deterministic model mounts for ledger conformance tests.",
+      "generated_readme": false,
+      "manifest": "crates/sim-ledger-test-support/Cargo.toml",
+      "name": "sim-ledger-test-support",
+      "publish": "false",
+      "readme": "crates/sim-ledger-test-support/README.md",
+      "root": "crates/sim-ledger-test-support",
       "target_kinds": [
         "lib"
       ]

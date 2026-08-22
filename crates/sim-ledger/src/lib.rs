@@ -31,4 +31,4 @@ pub use model::{
 };
 pub use report::{BalanceKey, BalanceRow, balances};
 pub use set::{IdAllocationError, LedgerSet, SetManifest};
-pub use store::YearStore;
+pub use store::{StoreError, YearStore};

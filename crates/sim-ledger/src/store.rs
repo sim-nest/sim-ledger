@@ -1,360 +1,157 @@
-//! SQLite storage for one immutable ledger year file.
+//! Portable persistence for one ledger year on a supplied Table/Dir mount.
+#![allow(missing_docs)]
 
-use std::fs::OpenOptions;
-use std::path::Path;
+use crate::model::{
+    Account, Posting, Voucher, VoucherBalanceViolation, YearData, voucher_balance_violations,
+};
+use serde::{Deserialize, Serialize};
+use sim_storage_port::{HostDirError, HostDirPort, NeverCancel};
+use std::{cell::RefCell, collections::BTreeMap, error::Error, fmt, sync::Arc};
 
-use rusqlite::types::Type;
-use rusqlite::{Connection, OptionalExtension, params};
+#[derive(Debug)]
+pub enum StoreError {
+    Mount(HostDirError),
+    Malformed(String),
+    AlreadyExists,
+    Closed,
+}
+impl fmt::Display for StoreError {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Mount(e) => write!(out, "ledger mount failure: {e}"),
+            Self::Malformed(e) => write!(out, "malformed ledger content: {e}"),
+            Self::AlreadyExists => out.write_str("ledger content already exists"),
+            Self::Closed => out.write_str("ledger year is closed"),
+        }
+    }
+}
+impl Error for StoreError {}
+impl From<HostDirError> for StoreError {
+    fn from(value: HostDirError) -> Self {
+        Self::Mount(value)
+    }
+}
 
-use crate::model::{Account, Amount, Posting, Voucher, VoucherBalanceViolation};
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct PersistedYear {
+    data: YearData,
+    #[serde(default)]
+    meta: BTreeMap<String, String>,
+    #[serde(default)]
+    id_state: BTreeMap<String, i64>,
+}
 
-const SCHEMA: &str = include_str!("schema.sql");
-const META_CLOSING_STATE: &str = "closing_state";
-const CLOSING_STATE_CLOSED: &str = "closed";
-
-/// A connection to one per-year SQLite ledger file.
 pub struct YearStore {
-    /// Open SQLite connection for the year file.
-    pub conn: Connection,
-    /// Ledger year carried by this file.
+    mount: Arc<dyn HostDirPort>,
+    leaf: String,
+    persisted: RefCell<PersistedYear>,
     pub year: i32,
 }
-
 impl YearStore {
-    /// Create a fresh `<year>.sqlite` with the ledger schema.
-    ///
-    /// The call uses SQLite exclusive creation, so it fails when `path` already
-    /// exists.
-    pub fn create(path: &Path, year: i32) -> rusqlite::Result<YearStore> {
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map_err(|_| rusqlite::Error::InvalidPath(path.to_path_buf()))?;
-        drop(file);
-        let conn = Connection::open(path)?;
-        conn.execute_batch(SCHEMA)?;
-        let store = YearStore { conn, year };
-        store.set_meta("year", &year.to_string())?;
+    pub fn create(mount: Arc<dyn HostDirPort>, year: i32) -> Result<Self, StoreError> {
+        let leaf = year_leaf(year);
+        if mount.metadata(std::slice::from_ref(&leaf))?.is_some() {
+            return Err(StoreError::AlreadyExists);
+        }
+        let store = Self {
+            mount,
+            leaf,
+            year,
+            persisted: RefCell::new(PersistedYear {
+                data: YearData {
+                    year,
+                    ..YearData::default()
+                },
+                meta: BTreeMap::new(),
+                id_state: BTreeMap::new(),
+            }),
+        };
+        store.persist()?;
         Ok(store)
     }
-
-    /// Open an existing year file.
-    pub fn open(path: &Path) -> rusqlite::Result<YearStore> {
-        let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        let year = conn.query_row("SELECT value FROM meta WHERE key = 'year'", [], |row| {
-            let value: String = row.get(0)?;
-            parse_year(value)
-        })?;
-        Ok(YearStore { conn, year })
-    }
-
-    /// Insert one year-local account.
-    pub fn insert_account(&self, account: &Account) -> rusqlite::Result<()> {
-        self.ensure_mutable()?;
-        self.conn.execute(
-            "INSERT INTO account(number, name, note, sru_plus, sru_minus) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                account.number,
-                account.name,
-                account.note,
-                account.sru_plus,
-                account.sru_minus
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Insert one voucher.
-    pub fn insert_voucher(&self, voucher: &Voucher) -> rusqlite::Result<()> {
-        self.ensure_mutable()?;
-        self.conn.execute(
-            "INSERT INTO voucher(id, source_id, date, text) VALUES (?1, ?2, ?3, ?4)",
-            params![voucher.id, voucher.source_id, voucher.date, voucher.text],
-        )?;
-        Ok(())
-    }
-
-    /// Insert one posting line.
-    pub fn insert_posting(&self, posting: &Posting) -> rusqlite::Result<()> {
-        self.ensure_mutable()?;
-        self.conn.execute(
-            "INSERT INTO posting(id, source_id, voucher_id, account, minor, text) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                posting.id,
-                posting.source_id,
-                posting.voucher_id,
-                posting.account,
-                posting.amount.0,
-                posting.text
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Store a mirrored id cursor for a closed year file.
-    pub fn set_id_state(&self, kind: &str, next: i64) -> rusqlite::Result<()> {
-        self.conn.execute(
-            "INSERT INTO id_state(kind, next) VALUES (?1, ?2) \
-             ON CONFLICT(kind) DO UPDATE SET next = excluded.next",
-            params![kind, next],
-        )?;
-        Ok(())
-    }
-
-    /// Store one self-describing metadata entry.
-    pub fn set_meta(&self, key: &str, value: &str) -> rusqlite::Result<()> {
-        self.conn.execute(
-            "INSERT INTO meta(key, value) VALUES (?1, ?2) \
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![key, value],
-        )?;
-        Ok(())
-    }
-
-    /// Read one self-describing metadata entry.
-    pub fn meta_value(&self, key: &str) -> rusqlite::Result<Option<String>> {
-        self.conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = ?1",
-                params![key],
-                |row| row.get(0),
-            )
-            .optional()
-    }
-
-    /// Return whether the year is explicitly closed.
-    pub fn is_closed(&self) -> rusqlite::Result<bool> {
-        Ok(self.meta_value(META_CLOSING_STATE)?.as_deref() == Some(CLOSING_STATE_CLOSED))
-    }
-
-    /// Read all vouchers ordered by canonical id.
-    pub fn vouchers(&self) -> rusqlite::Result<Vec<Voucher>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, source_id, date, text FROM voucher ORDER BY id")?;
-        let rows = stmt.query_map([], |row| {
-            Ok(Voucher {
-                id: row.get(0)?,
-                source_id: row.get(1)?,
-                date: row.get(2)?,
-                text: row.get(3)?,
-            })
-        })?;
-        rows.collect()
-    }
-
-    /// Read all postings ordered by canonical id.
-    pub fn postings(&self) -> rusqlite::Result<Vec<Posting>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, source_id, voucher_id, account, minor, text FROM posting ORDER BY id",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(Posting {
-                id: row.get(0)?,
-                source_id: row.get(1)?,
-                voucher_id: row.get(2)?,
-                account: row.get(3)?,
-                amount: Amount(row.get(4)?),
-                text: row.get(5)?,
-            })
-        })?;
-        rows.collect()
-    }
-
-    /// Return persisted vouchers that have no postings or a nonzero posting sum.
-    pub fn voucher_balance_violations(&self) -> rusqlite::Result<Vec<VoucherBalanceViolation>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT v.id, COUNT(p.id), COALESCE(SUM(p.minor), 0) \
-             FROM voucher v \
-             LEFT JOIN posting p ON p.voucher_id = v.id \
-             GROUP BY v.id \
-             HAVING COUNT(p.id) = 0 OR COALESCE(SUM(p.minor), 0) != 0 \
-             ORDER BY v.id",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            let posting_count = row.get::<_, i64>(1)?;
-            let posting_count = usize::try_from(posting_count).map_err(|err| {
-                rusqlite::Error::FromSqlConversionFailure(1, Type::Integer, Box::new(err))
-            })?;
-            Ok(VoucherBalanceViolation {
-                voucher_id: row.get(0)?,
-                posting_count,
-                minor_sum: row.get(2)?,
-            })
-        })?;
-        rows.collect()
-    }
-
-    fn ensure_mutable(&self) -> rusqlite::Result<()> {
-        if self.is_closed()? {
-            return Err(rusqlite::Error::InvalidQuery);
+    pub fn open(mount: Arc<dyn HostDirPort>, year: i32) -> Result<Self, StoreError> {
+        let leaf = year_leaf(year);
+        let bytes = mount.read(std::slice::from_ref(&leaf))?;
+        let text = std::str::from_utf8(&bytes).map_err(|e| StoreError::Malformed(e.to_string()))?;
+        let persisted: PersistedYear =
+            toml::from_str(text).map_err(|e| StoreError::Malformed(e.to_string()))?;
+        if persisted.data.year != year {
+            return Err(StoreError::Malformed("year identity mismatch".into()));
         }
+        Ok(Self {
+            mount,
+            leaf,
+            persisted: RefCell::new(persisted),
+            year,
+        })
+    }
+    pub fn accounts(&self) -> Result<Vec<Account>, StoreError> {
+        Ok(self.persisted.borrow().data.accounts.clone())
+    }
+    pub fn vouchers(&self) -> Result<Vec<Voucher>, StoreError> {
+        let mut v = self.persisted.borrow().data.vouchers.clone();
+        v.sort_by_key(|r| r.id);
+        Ok(v)
+    }
+    pub fn postings(&self) -> Result<Vec<Posting>, StoreError> {
+        let mut v = self.persisted.borrow().data.postings.clone();
+        v.sort_by_key(|r| r.id);
+        Ok(v)
+    }
+    pub fn insert_account(&self, row: &Account) -> Result<(), StoreError> {
+        self.mutate(|p| p.data.accounts.push(row.clone()))
+    }
+    pub fn insert_voucher(&self, row: &Voucher) -> Result<(), StoreError> {
+        self.mutate(|p| p.data.vouchers.push(row.clone()))
+    }
+    pub fn insert_posting(&self, row: &Posting) -> Result<(), StoreError> {
+        self.mutate(|p| p.data.postings.push(row.clone()))
+    }
+    pub fn set_id_state(&self, kind: &str, next: i64) -> Result<(), StoreError> {
+        self.mutate(|p| {
+            p.id_state.insert(kind.into(), next);
+        })
+    }
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        self.mutate_permitted(true, |p| {
+            p.meta.insert(key.into(), value.into());
+        })
+    }
+    pub fn meta_value(&self, key: &str) -> Result<Option<String>, StoreError> {
+        Ok(self.persisted.borrow().meta.get(key).cloned())
+    }
+    pub fn is_closed(&self) -> Result<bool, StoreError> {
+        Ok(self.meta_value("closing_state")?.as_deref() == Some("closed"))
+    }
+    pub fn voucher_balance_violations(&self) -> Result<Vec<VoucherBalanceViolation>, StoreError> {
+        voucher_balance_violations(&self.vouchers()?, &self.postings()?)
+            .map_err(|e| StoreError::Malformed(e.to_string()))
+    }
+    fn mutate(&self, edit: impl FnOnce(&mut PersistedYear)) -> Result<(), StoreError> {
+        self.mutate_permitted(false, edit)
+    }
+    fn mutate_permitted(
+        &self,
+        permit_closed: bool,
+        edit: impl FnOnce(&mut PersistedYear),
+    ) -> Result<(), StoreError> {
+        if !permit_closed && self.is_closed()? {
+            return Err(StoreError::Closed);
+        }
+        edit(&mut self.persisted.borrow_mut());
+        self.persist()
+    }
+    fn persist(&self) -> Result<(), StoreError> {
+        let text = toml::to_string(&*self.persisted.borrow())
+            .map_err(|e| StoreError::Malformed(e.to_string()))?;
+        self.mount.replace(
+            std::slice::from_ref(&self.leaf),
+            text.as_bytes(),
+            &NeverCancel,
+        )?;
         Ok(())
     }
 }
-
-fn parse_year(value: String) -> rusqlite::Result<i32> {
-    value
-        .parse::<i32>()
-        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn year_store_round_trips_balanced_voucher() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("2022.sqlite");
-        {
-            let store = YearStore::create(&path, 2022).unwrap();
-            store.insert_account(&account(1910, "Cash")).unwrap();
-            store.insert_account(&account(3010, "Sales")).unwrap();
-            store
-                .insert_voucher(&Voucher {
-                    id: 100,
-                    source_id: Some(17),
-                    date: "2022-05-04".to_owned(),
-                    text: Some("Receipt".to_owned()),
-                })
-                .unwrap();
-            store
-                .insert_posting(&Posting {
-                    id: 200,
-                    source_id: Some(31),
-                    voucher_id: 100,
-                    account: 1910,
-                    amount: Amount(12_345),
-                    text: Some("Bank".to_owned()),
-                })
-                .unwrap();
-            store
-                .insert_posting(&Posting {
-                    id: 201,
-                    source_id: Some(32),
-                    voucher_id: 100,
-                    account: 3010,
-                    amount: Amount(-12_345),
-                    text: Some("Revenue".to_owned()),
-                })
-                .unwrap();
-            store.set_id_state("voucher", 101).unwrap();
-            store.set_id_state("posting", 202).unwrap();
-        }
-
-        let store = YearStore::open(&path).unwrap();
-        assert_eq!(store.year, 2022);
-        assert_eq!(
-            store.vouchers().unwrap(),
-            vec![Voucher {
-                id: 100,
-                source_id: Some(17),
-                date: "2022-05-04".to_owned(),
-                text: Some("Receipt".to_owned()),
-            }]
-        );
-        assert_eq!(
-            store.postings().unwrap(),
-            vec![
-                Posting {
-                    id: 200,
-                    source_id: Some(31),
-                    voucher_id: 100,
-                    account: 1910,
-                    amount: Amount(12_345),
-                    text: Some("Bank".to_owned()),
-                },
-                Posting {
-                    id: 201,
-                    source_id: Some(32),
-                    voucher_id: 100,
-                    account: 3010,
-                    amount: Amount(-12_345),
-                    text: Some("Revenue".to_owned()),
-                },
-            ]
-        );
-        let sum: i64 = store
-            .conn
-            .query_row("SELECT SUM(minor) FROM posting", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(sum, 0);
-    }
-
-    #[test]
-    fn create_fails_when_year_file_exists() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("2023.sqlite");
-
-        let store = YearStore::create(&path, 2023).unwrap();
-        drop(store);
-
-        assert!(YearStore::create(&path, 2023).is_err());
-    }
-
-    #[test]
-    fn year_store_reports_voucher_balance_violations() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("2024.sqlite");
-        let store = YearStore::create(&path, 2024).unwrap();
-        store.insert_account(&account(1910, "Cash")).unwrap();
-        store.insert_account(&account(3010, "Sales")).unwrap();
-        store
-            .insert_voucher(&Voucher {
-                id: 1,
-                source_id: None,
-                date: "2024-01-01".to_owned(),
-                text: None,
-            })
-            .unwrap();
-        store
-            .insert_voucher(&Voucher {
-                id: 2,
-                source_id: None,
-                date: "2024-01-02".to_owned(),
-                text: None,
-            })
-            .unwrap();
-        store
-            .insert_posting(&Posting {
-                id: 1,
-                source_id: None,
-                voucher_id: 1,
-                account: 1910,
-                amount: Amount(100),
-                text: None,
-            })
-            .unwrap();
-
-        let violations = store.voucher_balance_violations().unwrap();
-
-        assert_eq!(
-            violations,
-            vec![
-                VoucherBalanceViolation {
-                    voucher_id: 1,
-                    posting_count: 1,
-                    minor_sum: 100,
-                },
-                VoucherBalanceViolation {
-                    voucher_id: 2,
-                    posting_count: 0,
-                    minor_sum: 0,
-                },
-            ]
-        );
-    }
-
-    fn account(number: i64, name: &str) -> Account {
-        Account {
-            number,
-            name: name.to_owned(),
-            note: None,
-            sru_plus: None,
-            sru_minus: None,
-        }
-    }
+fn year_leaf(year: i32) -> String {
+    format!("year-{year}.toml")
 }

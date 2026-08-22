@@ -1,7 +1,6 @@
-use std::fs;
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::num::TryFromIntError;
-use std::path::Path;
 
 use sim_ledger::{
     Amount, BalanceKey, BalanceRow, LedgerSet, Posting, SourceYear, balances, import_year,
@@ -13,26 +12,31 @@ use sim_lib_ledger_close::{
     financial_statements,
 };
 
+use crate::CommandContext;
 use crate::args::{Command, DraftPosting, ImportSource, ReportGroup, YearSelection};
 use crate::error::CliError;
 
-pub(crate) fn execute(command: Command, out: &mut dyn Write) -> Result<(), CliError> {
+pub(crate) fn execute(
+    context: &CommandContext,
+    command: Command,
+    out: &mut dyn Write,
+) -> Result<(), CliError> {
     match command {
-        Command::New { set_dir, label } => create_set(&set_dir, &label, out),
+        Command::New { set_dir, label } => create_set(context, &set_dir, &label, out),
         Command::Import {
             set_dir,
             source,
             year,
-        } => import_source(&set_dir, source, year, out),
-        Command::Years { set_dir } => list_years(&set_dir, out),
+        } => import_source(context, &set_dir, source, year, out),
+        Command::Years { set_dir } => list_years(context, &set_dir, out),
         Command::Report {
             set_dir,
             years,
             group,
-        } => report(&set_dir, years, group, out),
-        Command::Close { set_dir, year } => close(&set_dir, year, out),
-        Command::Statements { set_dir, year } => statements(&set_dir, year, out),
-        Command::SruCompare { set_dir, years } => sru_compare(&set_dir, &years, out),
+        } => report(context, &set_dir, years, group, out),
+        Command::Close { set_dir, year } => close(context, &set_dir, year, out),
+        Command::Statements { set_dir, year } => statements(context, &set_dir, year, out),
+        Command::SruCompare { set_dir, years } => sru_compare(context, &set_dir, &years, out),
         Command::DraftCheck {
             date,
             text,
@@ -41,26 +45,40 @@ pub(crate) fn execute(command: Command, out: &mut dyn Write) -> Result<(), CliEr
     }
 }
 
-fn create_set(set_dir: &Path, label: &str, out: &mut dyn Write) -> Result<(), CliError> {
-    let set = LedgerSet::create(set_dir, label)?;
+fn mount(
+    context: &CommandContext,
+    name: &str,
+) -> Result<std::sync::Arc<dyn sim_storage_port::HostDirPort>, CliError> {
+    context
+        .ledger_sets
+        .get(name)
+        .cloned()
+        .ok_or_else(|| CliError::Report(format!("ledger mount {name} is not supplied")))
+}
+fn create_set(
+    context: &CommandContext,
+    set_dir: &str,
+    label: &str,
+    out: &mut dyn Write,
+) -> Result<(), CliError> {
+    let set = LedgerSet::create(mount(context, set_dir)?, label)?;
     writeln!(
         out,
         "created {} (next voucher id {}, next posting id {})",
-        set_dir.display(),
-        set.manifest.next_voucher_id,
-        set.manifest.next_posting_id
+        set_dir, set.manifest.next_voucher_id, set.manifest.next_posting_id
     )?;
     Ok(())
 }
 
 fn import_source(
-    set_dir: &Path,
+    context: &CommandContext,
+    set_dir: &str,
     source: ImportSource,
     year: i32,
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let mut set = LedgerSet::open(set_dir)?;
-    let source = read_source(source, year)?;
+    let mut set = LedgerSet::open(mount(context, set_dir)?)?;
+    let source = read_source(context, source, year)?;
     let summary = ImportSummary::from_source(&set, &source)?;
     import_year(&mut set, source)?;
     writeln!(
@@ -76,31 +94,66 @@ fn import_source(
     Ok(())
 }
 
-fn read_source(source: ImportSource, year: i32) -> Result<SourceYear, CliError> {
+fn read_source(
+    context: &CommandContext,
+    source: ImportSource,
+    year: i32,
+) -> Result<SourceYear, CliError> {
     match source {
-        ImportSource::Odb(path) => Ok(read_odb_for_year(&path, year)?),
+        ImportSource::Odb(path) => {
+            let mount = import_mount(context, &path)?;
+            let bytes = mount
+                .read(&["content.odb".into()])
+                .map_err(|e| CliError::Report(e.to_string()))?;
+            Ok(read_odb_for_year(&bytes, year)?)
+        }
         ImportSource::Csv(dir) => {
-            let script = read_csv_script(&dir)?;
+            let mount = import_mount(context, &dir)?;
+            let script = read_csv_script(mount.as_ref())?;
             let schema = parse_script(&script);
-            Ok(load_csv(&dir, year, &schema)?)
+            let mut files = BTreeMap::new();
+            for name in ["konto.csv", "ver.csv", "trans.csv"] {
+                files.insert(
+                    name.into(),
+                    mount
+                        .read(&[name.into()])
+                        .map_err(|e| CliError::Report(e.to_string()))?,
+                );
+            }
+            Ok(load_csv(&files, year, &schema)?)
         }
     }
 }
 
-fn read_csv_script(dir: &Path) -> Result<String, CliError> {
+fn import_mount(
+    context: &CommandContext,
+    path: &str,
+) -> Result<std::sync::Arc<dyn sim_storage_port::HostDirPort>, CliError> {
+    let key = path;
+    context
+        .imports
+        .get(key)
+        .cloned()
+        .ok_or_else(|| CliError::Report(format!("import mount {key} is not supplied")))
+}
+fn read_csv_script(dir: &dyn sim_storage_port::HostDirPort) -> Result<String, CliError> {
     for candidate in ["database/script", "script"] {
-        let path = dir.join(candidate);
-        if path.is_file() {
-            return Ok(fs::read_to_string(path)?);
+        let parts = candidate.split('/').map(str::to_owned).collect::<Vec<_>>();
+        if let Ok(bytes) = dir.read(&parts) {
+            return String::from_utf8(bytes).map_err(|e| CliError::Report(e.to_string()));
         }
     }
     Err(CliError::CsvScriptMissing {
-        dir: dir.to_path_buf(),
+        mount: dir.label().to_owned(),
     })
 }
 
-fn list_years(set_dir: &Path, out: &mut dyn Write) -> Result<(), CliError> {
-    let set = LedgerSet::open(set_dir)?;
+fn list_years(
+    context: &CommandContext,
+    set_dir: &str,
+    out: &mut dyn Write,
+) -> Result<(), CliError> {
+    let set = LedgerSet::open(mount(context, set_dir)?)?;
     for year in set.manifest.years {
         writeln!(out, "{year}")?;
     }
@@ -108,12 +161,13 @@ fn list_years(set_dir: &Path, out: &mut dyn Write) -> Result<(), CliError> {
 }
 
 fn report(
-    set_dir: &Path,
+    context: &CommandContext,
+    set_dir: &str,
     years: YearSelection,
     group: ReportGroup,
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let set = LedgerSet::open(set_dir)?;
+    let set = LedgerSet::open(mount(context, set_dir)?)?;
     let years = match years {
         YearSelection::All => set.manifest.years.clone(),
         YearSelection::One(year) => vec![year],
@@ -146,21 +200,36 @@ fn write_sru_report(rows: &[BalanceRow], out: &mut dyn Write) -> Result<(), CliE
     Ok(())
 }
 
-fn close(set_dir: &Path, year: i32, out: &mut dyn Write) -> Result<(), CliError> {
-    let mut set = LedgerSet::open(set_dir)?;
+fn close(
+    context: &CommandContext,
+    set_dir: &str,
+    year: i32,
+    out: &mut dyn Write,
+) -> Result<(), CliError> {
+    let mut set = LedgerSet::open(mount(context, set_dir)?)?;
     let statements = close_year(&mut set, year)?;
     writeln!(out, "closed {year}")?;
     write_financial_statements(&statements, out)
 }
 
-fn statements(set_dir: &Path, year: i32, out: &mut dyn Write) -> Result<(), CliError> {
-    let set = LedgerSet::open(set_dir)?;
+fn statements(
+    context: &CommandContext,
+    set_dir: &str,
+    year: i32,
+    out: &mut dyn Write,
+) -> Result<(), CliError> {
+    let set = LedgerSet::open(mount(context, set_dir)?)?;
     let statements = financial_statements(&set, year)?;
     write_financial_statements(&statements, out)
 }
 
-fn sru_compare(set_dir: &Path, years: &[i32], out: &mut dyn Write) -> Result<(), CliError> {
-    let set = LedgerSet::open(set_dir)?;
+fn sru_compare(
+    context: &CommandContext,
+    set_dir: &str,
+    years: &[i32],
+    out: &mut dyn Write,
+) -> Result<(), CliError> {
+    let set = LedgerSet::open(mount(context, set_dir)?)?;
     writeln!(
         out,
         "SRU {}",

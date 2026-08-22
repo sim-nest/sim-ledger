@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::io;
-use std::path::Path;
 use std::str;
 
 use sim_ledger::{Account, Amount, SourcePosting, SourceVoucher, SourceYear};
@@ -158,24 +157,10 @@ impl From<io::Error> for OdbError {
 }
 
 /// Read a LibreOffice Base `.odb` ledger export for an explicit ledger year.
-pub fn read_odb_for_year(path: &Path, year: i32) -> Result<SourceYear, OdbError> {
-    read_odb_inner(path, year)
-}
-
-/// Read a LibreOffice Base `.odb` ledger export into a source year.
-///
-/// This convenience entry point infers the ledger year from trailing digits in
-/// the file stem. Use [`read_odb_for_year`] when the caller already has an
-/// authoritative year.
-pub fn read_odb(path: &Path) -> Result<SourceYear, OdbError> {
-    let year = year_from_path(path)?;
-    read_odb_inner(path, year)
-}
-
-fn read_odb_inner(path: &Path, year: i32) -> Result<SourceYear, OdbError> {
-    let script_bytes = open_zip_member(path, SCRIPT)?;
-    let data = open_zip_member(path, DATA)?;
-    let properties_bytes = open_zip_member(path, PROPERTIES)?;
+pub fn read_odb_for_year(bytes: &[u8], year: i32) -> Result<SourceYear, OdbError> {
+    let script_bytes = open_zip_member(bytes, SCRIPT)?;
+    let data = open_zip_member(bytes, DATA)?;
+    let properties_bytes = open_zip_member(bytes, PROPERTIES)?;
     let script = str::from_utf8(&script_bytes).map_err(|source| OdbError::Utf8 {
         member: SCRIPT,
         source,
@@ -464,21 +449,4 @@ fn cell<'a>(
         .ok_or(OdbError::MissingColumn { table, column })?;
     row.get(index)
         .ok_or(OdbError::MissingColumn { table, column })
-}
-
-fn year_from_path(path: &Path) -> Result<i32, OdbError> {
-    let stem = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .ok_or(OdbError::MissingYear)?;
-    let digits_rev: String = stem
-        .chars()
-        .rev()
-        .take_while(char::is_ascii_digit)
-        .collect();
-    if digits_rev.is_empty() {
-        return Err(OdbError::MissingYear);
-    }
-    let year = digits_rev.chars().rev().collect::<String>();
-    year.parse().map_err(|_| OdbError::MissingYear)
 }

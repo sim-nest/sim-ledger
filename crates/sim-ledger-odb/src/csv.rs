@@ -1,9 +1,9 @@
 //! CSV front-end for ledger source years.
 
+use std::collections::BTreeMap;
 use std::fmt;
-use std::fs::File;
+use std::io::Cursor;
 use std::num::ParseIntError;
-use std::path::Path;
 
 use ::csv::{Reader, ReaderBuilder, StringRecord, Trim};
 use sim_ledger::{Account, Amount, SourcePosting, SourceVoucher, SourceYear};
@@ -109,7 +109,11 @@ impl From<::csv::Error> for CsvLoadError {
 }
 
 /// Load exported `konto.csv`, `ver.csv`, and `trans.csv` into a source year.
-pub fn load_csv(dir: &Path, year: i32, schema: &OdbSchema) -> Result<SourceYear, CsvLoadError> {
+pub fn load_csv(
+    dir: &BTreeMap<String, Vec<u8>>,
+    year: i32,
+    schema: &OdbSchema,
+) -> Result<SourceYear, CsvLoadError> {
     Ok(SourceYear {
         year,
         accounts: read_accounts(dir)?,
@@ -120,7 +124,7 @@ pub fn load_csv(dir: &Path, year: i32, schema: &OdbSchema) -> Result<SourceYear,
     })
 }
 
-fn read_accounts(dir: &Path) -> Result<Vec<Account>, CsvLoadError> {
+fn read_accounts(dir: &BTreeMap<String, Vec<u8>>) -> Result<Vec<Account>, CsvLoadError> {
     let mut reader = reader(dir, KONTO)?;
     let headers = reader.headers()?.clone();
     let mut accounts = Vec::new();
@@ -145,7 +149,7 @@ fn read_accounts(dir: &Path) -> Result<Vec<Account>, CsvLoadError> {
     Ok(accounts)
 }
 
-fn read_vouchers(dir: &Path) -> Result<Vec<SourceVoucher>, CsvLoadError> {
+fn read_vouchers(dir: &BTreeMap<String, Vec<u8>>) -> Result<Vec<SourceVoucher>, CsvLoadError> {
     let mut reader = reader(dir, VER)?;
     let headers = reader.headers()?.clone();
     let mut vouchers = Vec::new();
@@ -160,7 +164,7 @@ fn read_vouchers(dir: &Path) -> Result<Vec<SourceVoucher>, CsvLoadError> {
     Ok(vouchers)
 }
 
-fn read_postings(dir: &Path) -> Result<Vec<SourcePosting>, CsvLoadError> {
+fn read_postings(dir: &BTreeMap<String, Vec<u8>>) -> Result<Vec<SourcePosting>, CsvLoadError> {
     let mut reader = reader(dir, TRANS)?;
     let headers = reader.headers()?.clone();
     let mut postings = Vec::new();
@@ -191,10 +195,17 @@ fn read_postings(dir: &Path) -> Result<Vec<SourcePosting>, CsvLoadError> {
     Ok(postings)
 }
 
-fn reader(dir: &Path, file: &'static str) -> Result<Reader<File>, CsvLoadError> {
+fn reader(
+    dir: &BTreeMap<String, Vec<u8>>,
+    file: &'static str,
+) -> Result<Reader<Cursor<Vec<u8>>>, CsvLoadError> {
+    let bytes = dir.get(file).cloned().ok_or(CsvLoadError::MissingField {
+        file,
+        field: "file",
+    })?;
     Ok(ReaderBuilder::new()
         .trim(Trim::All)
-        .from_path(dir.join(file))?)
+        .from_reader(Cursor::new(bytes)))
 }
 
 fn restart(schema: &OdbSchema, table: &'static str) -> Result<i64, CsvLoadError> {
@@ -257,87 +268,4 @@ fn optional_text(value: &str) -> Option<String> {
     } else {
         Some(value.to_owned())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use sim_ledger::{Amount, LedgerSet, Posting, Voucher, YearStore, import_year};
-
-    use super::*;
-    use crate::script::parse_script;
-
-    #[test]
-    fn csv_export_loads_and_imports_end_to_end() {
-        let dir = tempfile::tempdir().unwrap();
-        write_csvs(dir.path());
-        let schema = parse_script(SCRIPT);
-        let source = load_csv(dir.path(), 2024, &schema).unwrap();
-
-        assert_eq!(source.next_source_voucher_id, 11_612);
-        assert_eq!(source.next_source_posting_id, 25_471);
-
-        let set_dir = dir.path().join("set");
-        let mut set = LedgerSet::create(&set_dir, "Household").unwrap();
-        import_year(&mut set, source).unwrap();
-        let store = YearStore::open(&set.year_path(2024)).unwrap();
-
-        assert_eq!(
-            store.vouchers().unwrap(),
-            vec![Voucher {
-                id: 11_612,
-                source_id: Some(11_612),
-                date: "2024-01-31".to_owned(),
-                text: Some("Receipt".to_owned()),
-            }]
-        );
-        assert_eq!(
-            store.postings().unwrap(),
-            vec![
-                Posting {
-                    id: 25_471,
-                    source_id: Some(25_471),
-                    voucher_id: 11_612,
-                    account: 1910,
-                    amount: Amount(1_200),
-                    text: Some("Debit".to_owned()),
-                },
-                Posting {
-                    id: 25_472,
-                    source_id: Some(25_472),
-                    voucher_id: 11_612,
-                    account: 3010,
-                    amount: Amount(-1_200),
-                    text: Some("Credit".to_owned()),
-                },
-            ]
-        );
-    }
-
-    fn write_csvs(dir: &Path) {
-        fs::write(
-            dir.join(KONTO),
-            "k_nr,k_namn,k_text,k_sru_p,k_sru_m\n1910,Cash,,1000,\n3010,Sales,,,3000\n",
-        )
-        .unwrap();
-        fs::write(
-            dir.join(VER),
-            "v_nr,v_datum,v_text\n11612,2024-01-31,Receipt\n",
-        )
-        .unwrap();
-        fs::write(
-            dir.join(TRANS),
-            "t_nr,t_ver,t_konto,t_belopp,t_text\n25471,11612,1910,12.00,Debit\n25472,11612,3010,-12.00,Credit\n",
-        )
-        .unwrap();
-    }
-
-    const SCRIPT: &str = r#"
-CREATE CACHED TABLE "konto"("k_nr" INTEGER NOT NULL PRIMARY KEY,"k_namn" VARCHAR(50),"k_text" VARCHAR(200),"k_sru_p" INTEGER,"k_sru_m" INTEGER)
-CREATE CACHED TABLE "ver"("v_nr" INTEGER NOT NULL PRIMARY KEY,"v_datum" DATE NOT NULL,"v_text" VARCHAR(200))
-CREATE CACHED TABLE "trans"("t_nr" INTEGER NOT NULL PRIMARY KEY,"t_ver" INTEGER NOT NULL,"t_konto" INTEGER NOT NULL,"t_belopp" NUMERIC(50,2) NOT NULL,"t_text" VARCHAR(200))
-ALTER TABLE "ver" ALTER COLUMN "v_nr" RESTART WITH 11612
-ALTER TABLE "trans" ALTER COLUMN "t_nr" RESTART WITH 25471
-"#;
 }

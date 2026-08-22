@@ -10,11 +10,11 @@ repository = "https://github.com/sim-nest/sim-ledger"
 homepage = "https://github.com/sim-nest/sim-ledger"
 
 [dependencies]
-rusqlite = "0.31"
 sim-ledger = { version = "0.1.0", path = "../sim-ledger" }
 
 [dev-dependencies]
-tempfile = "3"
+sim-ledger-test-support = { path = "../sim-ledger-test-support" }
+sim-storage-port = { version = "0.1.0" }
 
 [lints]
 workspace = true

@@ -23,10 +23,8 @@ pub use trial_balance::{TrialBalanceRow, trial_balance};
 /// Failure while closing or projecting a ledger year.
 #[derive(Debug)]
 pub enum CloseError {
-    /// Filesystem work failed.
-    Io(std::io::Error),
-    /// SQLite work failed.
-    Sql(rusqlite::Error),
+    /// Supplied ledger storage failed.
+    Store(sim_ledger::StoreError),
     /// Trial balance postings do not net to zero.
     UnbalancedTrialBalance {
         /// Signed minor-unit sum across all trial-balance rows.
@@ -50,8 +48,7 @@ pub enum CloseError {
 impl fmt::Display for CloseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(error) => write!(f, "ledger close I/O failed: {error}"),
-            Self::Sql(error) => write!(f, "ledger close SQL failed: {error}"),
+            Self::Store(error) => write!(f, "ledger close storage failed: {error}"),
             Self::UnbalancedTrialBalance { minor_sum } => {
                 write!(f, "trial balance is unbalanced by {minor_sum} minor units")
             }
@@ -73,15 +70,9 @@ impl fmt::Display for CloseError {
 
 impl std::error::Error for CloseError {}
 
-impl From<std::io::Error> for CloseError {
-    fn from(error: std::io::Error) -> Self {
-        Self::Io(error)
-    }
-}
-
-impl From<rusqlite::Error> for CloseError {
-    fn from(error: rusqlite::Error) -> Self {
-        Self::Sql(error)
+impl From<sim_ledger::StoreError> for CloseError {
+    fn from(error: sim_ledger::StoreError) -> Self {
+        Self::Store(error)
     }
 }
 

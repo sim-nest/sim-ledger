@@ -1,5 +1,4 @@
 use std::fmt;
-use std::path::PathBuf;
 
 use sim_ledger::Amount;
 use time::{Date, Month};
@@ -18,32 +17,32 @@ ledger draft-check --date <YYYY-MM-DD> --text <text> --posting <account>:<amount
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     New {
-        set_dir: PathBuf,
+        set_dir: String,
         label: String,
     },
     Import {
-        set_dir: PathBuf,
+        set_dir: String,
         source: ImportSource,
         year: i32,
     },
     Years {
-        set_dir: PathBuf,
+        set_dir: String,
     },
     Report {
-        set_dir: PathBuf,
+        set_dir: String,
         years: YearSelection,
         group: ReportGroup,
     },
     Close {
-        set_dir: PathBuf,
+        set_dir: String,
         year: i32,
     },
     Statements {
-        set_dir: PathBuf,
+        set_dir: String,
         year: i32,
     },
     SruCompare {
-        set_dir: PathBuf,
+        set_dir: String,
         years: Vec<i32>,
     },
     DraftCheck {
@@ -55,8 +54,8 @@ pub(crate) enum Command {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ImportSource {
-    Odb(PathBuf),
-    Csv(PathBuf),
+    Odb(String),
+    Csv(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,7 +117,7 @@ fn parse_new(args: &[String]) -> Result<Command, ParseError> {
         index += 1;
     }
     Ok(Command::New {
-        set_dir: PathBuf::from(set_dir),
+        set_dir: set_dir.to_owned(),
         label: label.ok_or_else(|| ParseError("missing --label".to_owned()))?,
     })
 }
@@ -134,14 +133,14 @@ fn parse_import(args: &[String]) -> Result<Command, ParseError> {
                 index += 1;
                 set_source(
                     &mut source,
-                    ImportSource::Odb(PathBuf::from(value(rest, index, "--odb")?)),
+                    ImportSource::Odb(value(rest, index, "--odb")?.to_owned()),
                 )?;
             }
             "--csv" => {
                 index += 1;
                 set_source(
                     &mut source,
-                    ImportSource::Csv(PathBuf::from(value(rest, index, "--csv")?)),
+                    ImportSource::Csv(value(rest, index, "--csv")?.to_owned()),
                 )?;
             }
             "--year" => {
@@ -153,7 +152,7 @@ fn parse_import(args: &[String]) -> Result<Command, ParseError> {
         index += 1;
     }
     Ok(Command::Import {
-        set_dir: PathBuf::from(set_dir),
+        set_dir: set_dir.to_owned(),
         source: source.ok_or_else(|| ParseError("missing --odb or --csv".to_owned()))?,
         year: year.ok_or_else(|| ParseError("missing --year".to_owned()))?,
     })
@@ -165,7 +164,7 @@ fn parse_years(args: &[String]) -> Result<Command, ParseError> {
         return Err(ParseError(format!("unexpected argument {:?}", rest[0])));
     }
     Ok(Command::Years {
-        set_dir: PathBuf::from(set_dir),
+        set_dir: set_dir.to_owned(),
     })
 }
 
@@ -197,7 +196,7 @@ fn parse_report(args: &[String]) -> Result<Command, ParseError> {
         index += 1;
     }
     Ok(Command::Report {
-        set_dir: PathBuf::from(set_dir),
+        set_dir: set_dir.to_owned(),
         years,
         group,
     })
@@ -207,7 +206,7 @@ fn parse_close(args: &[String]) -> Result<Command, ParseError> {
     let (set_dir, rest) = positional(args, "set-dir")?;
     let year = parse_required_year_option(rest)?;
     Ok(Command::Close {
-        set_dir: PathBuf::from(set_dir),
+        set_dir: set_dir.to_owned(),
         year,
     })
 }
@@ -216,7 +215,7 @@ fn parse_statements(args: &[String]) -> Result<Command, ParseError> {
     let (set_dir, rest) = positional(args, "set-dir")?;
     let year = parse_required_year_option(rest)?;
     Ok(Command::Statements {
-        set_dir: PathBuf::from(set_dir),
+        set_dir: set_dir.to_owned(),
         year,
     })
 }
@@ -236,7 +235,7 @@ fn parse_sru_compare(args: &[String]) -> Result<Command, ParseError> {
         index += 1;
     }
     Ok(Command::SruCompare {
-        set_dir: PathBuf::from(set_dir),
+        set_dir: set_dir.to_owned(),
         years: years.ok_or_else(|| ParseError("missing --years".to_owned()))?,
     })
 }
