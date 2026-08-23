@@ -14,11 +14,11 @@ default = []
 sim = ["dep:sim-codec", "dep:sim-kernel"]
 
 [dependencies]
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 sim-codec = { version = "0.1.4", optional = true }
 sim-kernel = { version = "0.2.0", optional = true }
-toml = "0.8"
+toml = "1.1"
 
 [dev-dependencies]
 tempfile = "3"

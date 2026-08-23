@@ -10,7 +10,7 @@ repository = "https://github.com/sim-nest/sim-ledger"
 homepage = "https://github.com/sim-nest/sim-ledger"
 
 [dependencies]
-rusqlite = "0.31"
+rusqlite = "0.40"
 sim-ledger = { version = "0.1.0", path = "../sim-ledger" }
 
 [dev-dependencies]
