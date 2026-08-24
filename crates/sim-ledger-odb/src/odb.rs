@@ -9,7 +9,7 @@ use sim_ledger::{Account, Amount, SourcePosting, SourceVoucher, SourceYear};
 
 use crate::hsqldb::{Cell, HsqlError, read_table};
 use crate::open_zip_member;
-use crate::script::{OdbSchema, parse_script};
+use crate::script::{OdbSchema, SchemaError, parse_script};
 
 const SCRIPT: &str = "database/script";
 const DATA: &str = "database/data";
@@ -18,6 +18,11 @@ const PROPERTIES: &str = "database/properties";
 /// Failure while reading an ODB ledger export.
 #[derive(Debug)]
 pub enum OdbError {
+    /// The HSQLDB schema script failed bounded decoding or domain admission.
+    Schema {
+        /// Original schema failure.
+        source: SchemaError,
+    },
     /// ZIP or filesystem failure.
     Io {
         /// Original IO error.
@@ -93,6 +98,7 @@ pub enum OdbError {
 impl fmt::Display for OdbError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            OdbError::Schema { source } => write!(f, "invalid ODB schema: {source}"),
             OdbError::Io { source } => write!(f, "ODB IO failure: {source}"),
             OdbError::Utf8 { member, source } => {
                 write!(f, "ODB member {member} is not UTF-8: {source}")
@@ -142,6 +148,7 @@ impl fmt::Display for OdbError {
 impl std::error::Error for OdbError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            OdbError::Schema { source } => Some(source),
             OdbError::Io { source } => Some(source),
             OdbError::Utf8 { source, .. } => Some(source),
             OdbError::Hsql { source, .. } => Some(source),
@@ -171,7 +178,7 @@ pub fn read_odb_for_year(bytes: &[u8], year: i32) -> Result<SourceYear, OdbError
     })?;
     ensure_cache_scale_one(properties)?;
 
-    let schema = parse_script(script);
+    let schema = parse_script(script).map_err(|source| OdbError::Schema { source })?;
     let accounts = read_accounts(&data, &schema)?;
     let vouchers = read_vouchers(&data, &schema)?;
     let postings = read_postings(&data, &schema)?;

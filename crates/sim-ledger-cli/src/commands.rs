@@ -110,7 +110,8 @@ fn read_source(
         ImportSource::Csv(dir) => {
             let mount = import_mount(context, &dir)?;
             let script = read_csv_script(mount.as_ref())?;
-            let schema = parse_script(&script);
+            let schema =
+                parse_script(&script).map_err(|error| CliError::Report(error.to_string()))?;
             let mut files = BTreeMap::new();
             for name in ["konto.csv", "ver.csv", "trans.csv"] {
                 files.insert(
