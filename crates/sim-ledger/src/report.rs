@@ -20,59 +20,41 @@ pub fn balances(
     years: &[i32],
     by_sru: bool,
 ) -> Result<Vec<BalanceRow>, StoreError> {
+    if years.is_empty() {
+        return Ok(vec![]);
+    }
+    let mut rows = set.report_store(years)?.report_balances(years, by_sru)?;
     if by_sru {
-        sru_balances(set, years)
-    } else {
-        account_balances(set, years)
-    }
-}
-fn account_balances(set: &LedgerSet, years: &[i32]) -> Result<Vec<BalanceRow>, StoreError> {
-    let mut sums = BTreeMap::<(i32, i64), i128>::new();
-    for &year in years {
-        for posting in set.year_store(year)?.postings()? {
-            *sums.entry((year, posting.account)).or_default() += i128::from(posting.amount.0);
+        let mut sums = BTreeMap::<i64, i128>::new();
+        for row in rows {
+            *sums.entry(row.key).or_default() += i128::from(row.amount);
         }
-    }
-    sums.into_iter()
-        .map(|((year, account), sum)| {
-            Ok(BalanceRow {
-                key: BalanceKey::Account { year, account },
-                amount: Amount(exact(sum)?),
-            })
-        })
-        .collect()
-}
-fn sru_balances(set: &LedgerSet, years: &[i32]) -> Result<Vec<BalanceRow>, StoreError> {
-    let mut sums = BTreeMap::<i32, i128>::new();
-    for &year in years {
-        let store = set.year_store(year)?;
-        let accounts = store
-            .accounts()?
+        return sums
             .into_iter()
-            .map(|a| (a.number, a))
-            .collect::<BTreeMap<_, _>>();
-        for posting in store.postings()? {
-            if let Some(account) = accounts.get(&posting.account) {
-                let code = if posting.amount.0 >= 0 {
-                    account.sru_plus.or(account.sru_minus)
-                } else {
-                    account.sru_minus.or(account.sru_plus)
-                };
-                if let Some(code) = code {
-                    *sums.entry(code).or_default() += i128::from(posting.amount.0);
-                }
-            }
-        }
+            .filter(|(_, amount)| *amount != 0)
+            .map(|(key, amount)| {
+                Ok(BalanceRow {
+                    key: BalanceKey::Sru {
+                        code: i32::try_from(key)
+                            .map_err(|_| StoreError::Malformed("SRU code exceeds i32".into()))?,
+                    },
+                    amount: Amount(i64::try_from(amount).map_err(|_| {
+                        StoreError::Malformed("balance overflows minor units".into())
+                    })?),
+                })
+            })
+            .collect();
     }
-    sums.into_iter()
-        .map(|(code, sum)| {
+    rows.sort_by_key(|row| (row.year, row.key));
+    rows.into_iter()
+        .map(|row| {
             Ok(BalanceRow {
-                key: BalanceKey::Sru { code },
-                amount: Amount(exact(sum)?),
+                key: BalanceKey::Account {
+                    year: row.year,
+                    account: row.key,
+                },
+                amount: Amount(row.amount),
             })
         })
         .collect()
-}
-fn exact(sum: i128) -> Result<i64, StoreError> {
-    i64::try_from(sum).map_err(|_| StoreError::Malformed("balance overflows minor units".into()))
 }

@@ -12,8 +12,9 @@ use sim_relation_core::{
 };
 use sim_relation_migrate::AdoptionManifest;
 use sim_relation_plan::{
-    AdmissionLimits, ConflictAction, ConflictTarget, FieldRef, Mutation, NamedScalar,
-    OrderDirection, OrderKey, Rel, Scalar, ScalarOp, admit_mutation, admit_query,
+    AdmissionLimits, Aggregate, ConflictAction, ConflictTarget, FieldRef, JoinKind, Mutation,
+    NamedAggregate, NamedScalar, OrderDirection, OrderKey, Rel, Scalar, ScalarOp, SetOp,
+    admit_mutation, admit_query,
 };
 use sim_relation_schema::{
     AcceptAllValues, ColumnBuilder, Constraint, ForeignKey, PhysicalColumn, PhysicalSchema,
@@ -31,6 +32,22 @@ pub struct YearStore {
     domains: DomainCatalog,
     limits: Limits,
     pub year: i32,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrialBalanceData {
+    pub account: i64,
+    pub sru_plus: Option<i32>,
+    pub sru_minus: Option<i32>,
+    pub debit_minor: i64,
+    pub credit_minor: i64,
+    pub closing_minor: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReportBalanceData {
+    pub year: i32,
+    pub key: i64,
+    pub amount: i64,
 }
 impl YearStore {
     pub fn create(
@@ -65,6 +82,236 @@ impl YearStore {
             limits: Limits::new(100_000, 1_000_000, 256 * 1024 * 1024, 1_000_000)?,
             year,
         })
+    }
+    pub(crate) fn open_report(
+        factory: &dyn YearFileFactory,
+        mount: Arc<dyn HostDirPort>,
+        years: &[i32],
+    ) -> Result<Self, StoreError> {
+        let sources = years
+            .iter()
+            .enumerate()
+            .map(|(index, year)| {
+                let name = if index == 0 {
+                    "main".into()
+                } else {
+                    format!("year_{year}")
+                };
+                (name, year_leaf(*year))
+            })
+            .collect::<Vec<_>>();
+        Self::from_file(factory.open_report(mount, &sources)?, years[0])
+    }
+
+    pub fn trial_balance_data(&self) -> Result<Vec<TrialBalanceData>, StoreError> {
+        let joined = Rel::Join {
+            left: Box::new(scan("main", "account", "account")),
+            right: Box::new(scan("main", "posting", "posting")),
+            kind: JoinKind::Left,
+            on: call(
+                ScalarOp::Eq,
+                vec![field("account", "number"), field("posting", "account")],
+            ),
+        };
+        let positive = call(
+            ScalarOp::Gt,
+            vec![field("posting", "minor"), integer_scalar(0)],
+        );
+        let negative = call(
+            ScalarOp::Lt,
+            vec![field("posting", "minor"), integer_scalar(0)],
+        );
+        let conditional = |predicate, value| Scalar::Case {
+            branches: vec![(predicate, value)],
+            otherwise: Some(Box::new(integer_scalar(0))),
+        };
+        let grouped = Rel::Group {
+            input: Box::new(joined),
+            bind: binding("balance"),
+            keys: vec![
+                named("account", field("account", "number")),
+                named("sru_plus", field("account", "sru_plus")),
+                named("sru_minus", field("account", "sru_minus")),
+            ],
+            aggregates: vec![
+                aggregate("debit", conditional(positive, field("posting", "minor"))),
+                aggregate(
+                    "credit",
+                    conditional(
+                        negative,
+                        call(
+                            ScalarOp::Sub,
+                            vec![integer_scalar(0), field("posting", "minor")],
+                        ),
+                    ),
+                ),
+                aggregate(
+                    "closing",
+                    Scalar::Case {
+                        branches: vec![(
+                            call(ScalarOp::IsNull, vec![field("posting", "minor")]),
+                            integer_scalar(0),
+                        )],
+                        otherwise: Some(Box::new(field("posting", "minor"))),
+                    },
+                ),
+            ],
+            having: Some(call(
+                ScalarOp::Ge,
+                vec![field("balance", "debit"), integer_scalar(0)],
+            )),
+        };
+        let rows = self.query_rows(Rel::Order {
+            input: Box::new(grouped),
+            keys: vec![OrderKey {
+                scalar: field("balance", "account"),
+                direction: OrderDirection::Asc,
+            }],
+        })?;
+        rows.iter()
+            .map(|row| {
+                Ok(TrialBalanceData {
+                    account: cell_i64(row, 0)?,
+                    sru_plus: cell_optional_i32(row, 1)?,
+                    sru_minus: cell_optional_i32(row, 2)?,
+                    debit_minor: cell_i64(row, 3)?,
+                    credit_minor: cell_i64(row, 4)?,
+                    closing_minor: cell_i64(row, 5)?,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn report_balances(
+        &self,
+        years: &[i32],
+        by_sru: bool,
+    ) -> Result<Vec<ReportBalanceData>, StoreError> {
+        let projections = years
+            .iter()
+            .enumerate()
+            .map(|(index, year)| {
+                let source_name = if index == 0 {
+                    "main".into()
+                } else {
+                    format!("year_{year}")
+                };
+                let joined = Rel::Join {
+                    left: Box::new(scan(&source_name, "posting", "posting")),
+                    right: Box::new(scan(&source_name, "account", "account")),
+                    kind: JoinKind::Inner,
+                    on: call(
+                        ScalarOp::Eq,
+                        vec![field("posting", "account"), field("account", "number")],
+                    ),
+                };
+                let key = if by_sru {
+                    Scalar::Case {
+                        branches: vec![(
+                            call(
+                                ScalarOp::Ge,
+                                vec![field("posting", "minor"), integer_scalar(0)],
+                            ),
+                            call(
+                                ScalarOp::Coalesce,
+                                vec![field("account", "sru_plus"), field("account", "sru_minus")],
+                            ),
+                        )],
+                        otherwise: Some(Box::new(call(
+                            ScalarOp::Coalesce,
+                            vec![field("account", "sru_minus"), field("account", "sru_plus")],
+                        ))),
+                    }
+                } else {
+                    field("account", "number")
+                };
+                let projected = Rel::Project {
+                    input: Box::new(joined),
+                    bind: binding("source_row"),
+                    fields: vec![
+                        named("year", integer_scalar(i64::from(*year))),
+                        named("report_key", key),
+                        named("minor", field("posting", "minor")),
+                    ],
+                };
+                let filtered = if by_sru {
+                    Rel::Filter {
+                        input: Box::new(projected),
+                        predicate: call(
+                            ScalarOp::Not,
+                            vec![call(
+                                ScalarOp::IsNull,
+                                vec![field("source_row", "report_key")],
+                            )],
+                        ),
+                    }
+                } else {
+                    projected
+                };
+                let grouped = Rel::Group {
+                    input: Box::new(filtered),
+                    bind: binding("report"),
+                    keys: vec![
+                        named("year", field("source_row", "year")),
+                        named("report_key", field("source_row", "report_key")),
+                    ],
+                    aggregates: vec![aggregate("minor", field("source_row", "minor"))],
+                    having: Some(call(
+                        ScalarOp::Ne,
+                        vec![field("report", "minor"), integer_scalar(0)],
+                    )),
+                };
+                Rel::Order {
+                    input: Box::new(grouped),
+                    keys: vec![
+                        OrderKey {
+                            scalar: field("report", "year"),
+                            direction: OrderDirection::Asc,
+                        },
+                        OrderKey {
+                            scalar: field("report", "report_key"),
+                            direction: OrderDirection::Asc,
+                        },
+                    ],
+                }
+            })
+            .collect::<Vec<_>>();
+        let composed = if projections.len() == 1 {
+            projections.into_iter().next().unwrap()
+        } else {
+            Rel::Set {
+                op: SetOp::UnionAll,
+                inputs: projections,
+            }
+        };
+        self.query_rows(composed)?
+            .iter()
+            .map(|row| {
+                Ok(ReportBalanceData {
+                    year: cell_i32(row, 0)?,
+                    key: cell_i64(row, 1)?,
+                    amount: cell_i64(row, 2)?,
+                })
+            })
+            .collect()
+    }
+
+    fn query_rows(&self, rel: Rel) -> Result<Vec<Row>, StoreError> {
+        let plan = admit_query(
+            rel,
+            &self.schema,
+            &self.domains,
+            empty_type()?,
+            AdmissionLimits::default(),
+        )
+        .map_err(|e| StoreError::Invalid(e.to_string()))?;
+        let bindings = Bindings::new(&empty_type()?, [])?;
+        let mut sink = VecSink::default();
+        self.file
+            .borrow_mut()
+            .session()
+            .query(&plan, &bindings, &self.limits, &mut sink)?;
+        Ok(sink.rows)
     }
     pub fn accounts(&self) -> Result<Vec<Account>, StoreError> {
         self.select(
@@ -400,6 +647,9 @@ fn cell_optional_i32(r: &Row, i: usize) -> Result<Option<i32>, StoreError> {
         .map(|v| i32::try_from(v).map_err(|_| StoreError::Storage(SiteError::Conversion)))
         .transpose()
 }
+fn cell_i32(r: &Row, i: usize) -> Result<i32, StoreError> {
+    i32::try_from(cell_i64(r, i)?).map_err(|_| StoreError::Storage(SiteError::Conversion))
+}
 fn name<T: TryFrom<Symbol>>(v: &str) -> T
 where
     T::Error: fmt::Debug,
@@ -426,6 +676,31 @@ fn field(b: &str, n: &str) -> Scalar {
         binding: binding(b),
         field: field_name(n),
     })
+}
+fn scan(source_name: &str, table: &str, bind: &str) -> Rel {
+    Rel::Scan {
+        source: source(source_name),
+        table: table_name(table),
+        bind: binding(bind),
+    }
+}
+fn call(op: ScalarOp, values: Vec<Scalar>) -> Scalar {
+    Scalar::Call(op, values)
+}
+fn integer_scalar(value: i64) -> Scalar {
+    Scalar::Literal(integer(value))
+}
+fn named(name: &str, scalar: Scalar) -> NamedScalar {
+    NamedScalar {
+        name: field_name(name),
+        scalar,
+    }
+}
+fn aggregate(name: &str, scalar: Scalar) -> NamedAggregate {
+    NamedAggregate {
+        name: field_name(name),
+        aggregate: Aggregate::Sum(scalar),
+    }
 }
 fn empty_type() -> Result<RowType, StoreError> {
     RowType::new([]).map_err(|e| StoreError::Invalid(e.to_string()))

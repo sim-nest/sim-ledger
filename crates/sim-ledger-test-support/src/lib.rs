@@ -161,12 +161,20 @@ impl YearFileFactory for SqliteYearFileFactory {
         let bytes = mount.read(&[leaf.to_owned()])?;
         NativeYearFile::materialize(mount, leaf, &bytes)
     }
+    fn open_report(
+        &self,
+        mount: Arc<dyn HostDirPort>,
+        sources: &[(String, String)],
+    ) -> Result<Box<dyn RelationYearFile>, StoreError> {
+        NativeYearFile::report(mount, sources)
+    }
 }
 
 struct NativeYearFile {
     mount: Arc<dyn HostDirPort>,
     leaf: String,
     temp: tempfile::NamedTempFile,
+    _attached: Vec<tempfile::NamedTempFile>,
     session: Box<dyn Session>,
 }
 impl NativeYearFile {
@@ -200,6 +208,78 @@ impl NativeYearFile {
             mount,
             leaf: leaf.into(),
             temp,
+            _attached: vec![],
+            session,
+        }))
+    }
+    fn report(
+        mount: Arc<dyn HostDirPort>,
+        sources: &[(String, String)],
+    ) -> Result<Box<dyn RelationYearFile>, StoreError> {
+        let ((_, main_leaf), attachments) = sources.split_first().ok_or_else(|| {
+            StoreError::Invalid("a report requires at least one year source".into())
+        })?;
+        let main = tempfile::NamedTempFile::new().map_err(host)?;
+        std::fs::write(main.path(), mount.read(std::slice::from_ref(main_leaf))?).map_err(host)?;
+        let mut attached = Vec::with_capacity(attachments.len());
+        for (_, leaf) in attachments {
+            let temp = tempfile::NamedTempFile::new().map_err(host)?;
+            std::fs::write(temp.path(), mount.read(std::slice::from_ref(leaf))?).map_err(host)?;
+            attached.push(temp);
+        }
+        let main_ref = Symbol::new("ledger-report-main");
+        let attachment_refs = attachments
+            .iter()
+            .zip(&attached)
+            .enumerate()
+            .map(|(index, (_, temp))| {
+                (
+                    Symbol::new(format!("ledger-report-{index}")),
+                    temp.path().to_path_buf(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let domains = DomainCatalog::new([BaseDomain::I64.spec(), BaseDomain::Text.spec()])
+            .map_err(|e| StoreError::Invalid(e.to_string()))?;
+        let stores = std::iter::once((main_ref.clone(), main.path().to_path_buf()))
+            .chain(attachment_refs.iter().cloned());
+        let driver = SqliteDriver::new(domains, PreopenedStores::new(stores));
+        let locator = Datum::Node {
+            tag: Symbol::qualified("relation", "preopened"),
+            fields: vec![
+                (Symbol::new("ref"), Datum::Symbol(main_ref)),
+                (
+                    Symbol::new("access"),
+                    Datum::Symbol(Symbol::new("read-only")),
+                ),
+            ],
+        };
+        let limits = Limits::new(100_000, 1_000_000, 256 * 1024 * 1024, 1_000_000)?;
+        let mut session = driver.connect(&locator, &limits)?;
+        for ((name, _), (reference, _)) in attachments.iter().zip(&attachment_refs) {
+            session.attach(
+                &Datum::Node {
+                    tag: Symbol::qualified("relation", "attach"),
+                    fields: vec![
+                        (
+                            Symbol::new("name"),
+                            Datum::Symbol(Symbol::new(name.as_str())),
+                        ),
+                        (Symbol::new("ref"), Datum::Symbol(reference.clone())),
+                        (
+                            Symbol::new("access"),
+                            Datum::Symbol(Symbol::new("read-only")),
+                        ),
+                    ],
+                },
+                &limits,
+            )?;
+        }
+        Ok(Box::new(Self {
+            mount,
+            leaf: main_leaf.clone(),
+            temp: main,
+            _attached: attached,
             session,
         }))
     }

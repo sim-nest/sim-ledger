@@ -97,6 +97,9 @@ impl LedgerSet {
     pub fn create_year_store(&self, year: i32) -> Result<YearStore, StoreError> {
         YearStore::create(self.year_files.as_ref(), self.mount.clone(), year)
     }
+    pub(crate) fn report_store(&self, years: &[i32]) -> Result<YearStore, StoreError> {
+        YearStore::open_report(self.year_files.as_ref(), self.mount.clone(), years)
+    }
     pub fn mount(&self) -> Arc<dyn HostDirPort> {
         self.mount.clone()
     }

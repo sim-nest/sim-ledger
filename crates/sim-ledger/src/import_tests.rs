@@ -67,9 +67,70 @@ fn model_mount_preserves_content_order_ids_and_balances() {
         Some(7)
     );
     let rows = balances(&reopened, &[2024, 2025], true).unwrap();
-    assert_eq!(rows[0].key, BalanceKey::Sru { code: 1000 });
-    assert_eq!(rows[0].amount, Amount(250));
-    assert_eq!(rows[1].amount, Amount(-250));
+    assert_eq!(
+        rows,
+        vec![
+            crate::BalanceRow {
+                key: BalanceKey::Sru { code: 1000 },
+                amount: Amount(250),
+            },
+            crate::BalanceRow {
+                key: BalanceKey::Sru { code: 3000 },
+                amount: Amount(-250),
+            },
+        ]
+    );
+    assert_eq!(
+        balances(&reopened, &[2025, 2024], false).unwrap(),
+        vec![
+            crate::BalanceRow {
+                key: BalanceKey::Account {
+                    year: 2024,
+                    account: 1910,
+                },
+                amount: Amount(125),
+            },
+            crate::BalanceRow {
+                key: BalanceKey::Account {
+                    year: 2024,
+                    account: 3010,
+                },
+                amount: Amount(-125),
+            },
+            crate::BalanceRow {
+                key: BalanceKey::Account {
+                    year: 2025,
+                    account: 1910,
+                },
+                amount: Amount(125),
+            },
+            crate::BalanceRow {
+                key: BalanceKey::Account {
+                    year: 2025,
+                    account: 3010,
+                },
+                amount: Amount(-125),
+            },
+        ]
+    );
+    assert!(balances(&reopened, &[], true).unwrap().is_empty());
+
+    // A report session is assembled by attaching sources after connection. Its
+    // successful cross-source query proves cache invalidation, and its main
+    // source remains physically read-only even though YearStore has mutations.
+    let report = reopened.report_store(&[2024, 2025]).unwrap();
+    assert!(matches!(
+        report.insert_account(&Account {
+            number: 9999,
+            name: "Forbidden".into(),
+            note: None,
+            sru_plus: None,
+            sru_minus: None,
+        }),
+        Err(crate::StoreError::Storage(
+            sim_relation_site::SiteError::ReadOnly
+        ))
+    ));
 }
 
 #[test]

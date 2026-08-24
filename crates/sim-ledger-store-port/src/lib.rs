@@ -69,4 +69,13 @@ pub trait YearFileFactory: Send + Sync {
         mount: Arc<dyn HostDirPort>,
         leaf: &str,
     ) -> Result<Box<dyn RelationYearFile>, StoreError>;
+    /// Opens year files as one read-only session under the supplied logical source names.
+    ///
+    /// The first source is the session's `main` source. Remaining sources are attached
+    /// by name before the file is returned. Implementations must reject an empty list.
+    fn open_report(
+        &self,
+        mount: Arc<dyn HostDirPort>,
+        sources: &[(String, String)],
+    ) -> Result<Box<dyn RelationYearFile>, StoreError>;
 }

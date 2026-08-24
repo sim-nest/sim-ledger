@@ -1,4 +1,6 @@
-use crate::{ClosingState, close_state, close_year, financial_statements};
+use crate::{
+    ClosingState, TrialBalanceRow, close_state, close_year, financial_statements, trial_balance,
+};
 use sim_ledger::{Account, Amount, LedgerSet, Posting, Voucher};
 use sim_ledger_test_support::{ModelMount, SqliteYearFileFactory};
 use std::sync::Arc;
@@ -74,4 +76,59 @@ fn model_content_closes_without_host_time_or_paths() {
             })
             .is_err()
     );
+}
+
+#[test]
+fn trial_balance_freezes_posted_empty_and_closed_year_oracles() {
+    let mut set = set();
+    assert_eq!(
+        trial_balance(&set, 2026).unwrap(),
+        vec![
+            TrialBalanceRow {
+                year: 2026,
+                account: 1910,
+                sru_plus: Some(1000),
+                sru_minus: Some(1000),
+                opening_minor: 0,
+                debit_minor: 500,
+                credit_minor: 0,
+                closing_minor: 500,
+            },
+            TrialBalanceRow {
+                year: 2026,
+                account: 3010,
+                sru_plus: Some(3000),
+                sru_minus: Some(3000),
+                opening_minor: 0,
+                debit_minor: 0,
+                credit_minor: 500,
+                closing_minor: -500,
+            },
+        ]
+    );
+    let empty = set.create_year_store(2025).unwrap();
+    empty
+        .insert_account(&Account {
+            number: 1910,
+            name: "Cash".into(),
+            note: None,
+            sru_plus: Some(1000),
+            sru_minus: Some(1000),
+        })
+        .unwrap();
+    assert_eq!(
+        trial_balance(&set, 2025).unwrap(),
+        vec![TrialBalanceRow {
+            year: 2025,
+            account: 1910,
+            sru_plus: Some(1000),
+            sru_minus: Some(1000),
+            opening_minor: 0,
+            debit_minor: 0,
+            credit_minor: 0,
+            closing_minor: 0,
+        }]
+    );
+    close_year(&mut set, 2026).unwrap();
+    assert_eq!(trial_balance(&set, 2026).unwrap()[1].closing_minor, -500);
 }
