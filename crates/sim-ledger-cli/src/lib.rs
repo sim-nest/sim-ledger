@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+use sim_ledger::YearFileFactory;
 use sim_storage_port::HostDirPort;
 use std::io::Write;
 use std::{collections::BTreeMap, sync::Arc};
@@ -24,6 +25,8 @@ pub struct CommandContext {
     pub ledger_sets: BTreeMap<String, Arc<dyn HostDirPort>>,
     /// Opaque command names mapped to supplied import content.
     pub imports: BTreeMap<String, Arc<dyn HostDirPort>>,
+    /// Provider-neutral factory for private relational year sessions.
+    pub year_files: Arc<dyn YearFileFactory>,
     /// Deterministic wall-clock nanoseconds supplied by the active platform.
     pub wall_clock_ns: i128,
 }

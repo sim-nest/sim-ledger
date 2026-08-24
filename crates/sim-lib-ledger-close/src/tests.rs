@@ -1,11 +1,11 @@
 use crate::{ClosingState, close_state, close_year, financial_statements};
 use sim_ledger::{Account, Amount, LedgerSet, Posting, Voucher};
-use sim_ledger_test_support::ModelMount;
+use sim_ledger_test_support::{ModelMount, SqliteYearFileFactory};
 use std::sync::Arc;
 
 fn set() -> LedgerSet {
     let mount: Arc<dyn sim_storage_port::HostDirPort> = Arc::new(ModelMount::new("close-model"));
-    let mut set = LedgerSet::create(mount, "Close").unwrap();
+    let mut set = LedgerSet::create(mount, Arc::new(SqliteYearFileFactory), "Close").unwrap();
     let store = set.create_year_store(2026).unwrap();
     for row in [
         Account {

@@ -1,7 +1,7 @@
 //! Ledger-set manifests and set-level id allocation on supplied mounts.
 #![allow(missing_docs)]
 
-use crate::store::{StoreError, YearStore};
+use crate::store::{StoreError, YearFileFactory, YearStore};
 use sim_storage_port::{HostDirPort, NeverCancel};
 use std::{error, fmt, ops::Range, sync::Arc};
 const MANIFEST_FILE: &str = "ledger-set.toml";
@@ -16,6 +16,7 @@ pub struct SetManifest {
 #[derive(Clone)]
 pub struct LedgerSet {
     mount: Arc<dyn HostDirPort>,
+    year_files: Arc<dyn YearFileFactory>,
     pub manifest: SetManifest,
 }
 impl fmt::Debug for LedgerSet {
@@ -49,12 +50,17 @@ impl fmt::Display for IdAllocationError {
 }
 impl error::Error for IdAllocationError {}
 impl LedgerSet {
-    pub fn create(mount: Arc<dyn HostDirPort>, label: &str) -> Result<Self, StoreError> {
+    pub fn create(
+        mount: Arc<dyn HostDirPort>,
+        year_files: Arc<dyn YearFileFactory>,
+        label: &str,
+    ) -> Result<Self, StoreError> {
         if mount.metadata(&[MANIFEST_FILE.into()])?.is_some() {
             return Err(StoreError::AlreadyExists);
         }
         let set = Self {
             mount,
+            year_files,
             manifest: SetManifest {
                 label: label.into(),
                 next_voucher_id: 1,
@@ -65,11 +71,18 @@ impl LedgerSet {
         set.save()?;
         Ok(set)
     }
-    pub fn open(mount: Arc<dyn HostDirPort>) -> Result<Self, StoreError> {
+    pub fn open(
+        mount: Arc<dyn HostDirPort>,
+        year_files: Arc<dyn YearFileFactory>,
+    ) -> Result<Self, StoreError> {
         let bytes = mount.read(&[MANIFEST_FILE.into()])?;
         let text = std::str::from_utf8(&bytes).map_err(|e| StoreError::Malformed(e.to_string()))?;
         let manifest = toml::from_str(text).map_err(|e| StoreError::Malformed(e.to_string()))?;
-        Ok(Self { mount, manifest })
+        Ok(Self {
+            mount,
+            year_files,
+            manifest,
+        })
     }
     pub fn save(&self) -> Result<(), StoreError> {
         let text = toml::to_string_pretty(&self.manifest)
@@ -79,10 +92,10 @@ impl LedgerSet {
         Ok(())
     }
     pub fn year_store(&self, year: i32) -> Result<YearStore, StoreError> {
-        YearStore::open(self.mount.clone(), year)
+        YearStore::open(self.year_files.as_ref(), self.mount.clone(), year)
     }
     pub fn create_year_store(&self, year: i32) -> Result<YearStore, StoreError> {
-        YearStore::create(self.mount.clone(), year)
+        YearStore::create(self.year_files.as_ref(), self.mount.clone(), year)
     }
     pub fn mount(&self) -> Arc<dyn HostDirPort> {
         self.mount.clone()

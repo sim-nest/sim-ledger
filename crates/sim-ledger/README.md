@@ -8,6 +8,13 @@ sets. It has no SIM runtime dependency, so ledger data can be parsed, stored,
 reported, or encoded by surrounding crates without pulling in a larger runtime
 surface.
 
+Year files are relational without leaking a database driver into accounting
+code. `LedgerSet` receives a `YearFileFactory`; `YearStore` keeps the resulting
+session private and exposes only typed account, voucher, posting, metadata,
+id-state, and balance-violation operations. The logical schema and legacy
+adoption manifest are checked product contracts, while platform adapters own
+SQLite placement and exact mount materialization.
+
 ## Recipes
 
 The crate ships a generated-doc recipe book at `recipes/book.toml`. The first

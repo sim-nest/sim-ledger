@@ -31,4 +31,5 @@ pub use model::{
 };
 pub use report::{BalanceKey, BalanceRow, balances};
 pub use set::{IdAllocationError, LedgerSet, SetManifest};
-pub use store::{StoreError, YearStore};
+pub use sim_ledger_store_port::{RelationYearFile, StoreError, YearFileFactory};
+pub use store::{YearStore, ledger_schema, legacy_adoption_manifest};

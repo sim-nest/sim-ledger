@@ -1,5 +1,5 @@
 use crate::{CommandContext, run};
-use sim_ledger_test_support::ModelMount;
+use sim_ledger_test_support::{ModelMount, SqliteYearFileFactory};
 use std::{collections::BTreeMap, sync::Arc};
 
 fn context() -> CommandContext {
@@ -7,6 +7,7 @@ fn context() -> CommandContext {
     CommandContext {
         ledger_sets: BTreeMap::from([("books".into(), mount)]),
         imports: BTreeMap::new(),
+        year_files: Arc::new(SqliteYearFileFactory),
         wall_clock_ns: 1_767_225_600_000_000_000,
     }
 }

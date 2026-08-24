@@ -61,7 +61,7 @@ fn create_set(
     label: &str,
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let set = LedgerSet::create(mount(context, set_dir)?, label)?;
+    let set = LedgerSet::create(mount(context, set_dir)?, context.year_files.clone(), label)?;
     writeln!(
         out,
         "created {} (next voucher id {}, next posting id {})",
@@ -77,7 +77,7 @@ fn import_source(
     year: i32,
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let mut set = LedgerSet::open(mount(context, set_dir)?)?;
+    let mut set = LedgerSet::open(mount(context, set_dir)?, context.year_files.clone())?;
     let source = read_source(context, source, year)?;
     let summary = ImportSummary::from_source(&set, &source)?;
     import_year(&mut set, source)?;
@@ -153,7 +153,7 @@ fn list_years(
     set_dir: &str,
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let set = LedgerSet::open(mount(context, set_dir)?)?;
+    let set = LedgerSet::open(mount(context, set_dir)?, context.year_files.clone())?;
     for year in set.manifest.years {
         writeln!(out, "{year}")?;
     }
@@ -167,7 +167,7 @@ fn report(
     group: ReportGroup,
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let set = LedgerSet::open(mount(context, set_dir)?)?;
+    let set = LedgerSet::open(mount(context, set_dir)?, context.year_files.clone())?;
     let years = match years {
         YearSelection::All => set.manifest.years.clone(),
         YearSelection::One(year) => vec![year],
@@ -206,7 +206,7 @@ fn close(
     year: i32,
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let mut set = LedgerSet::open(mount(context, set_dir)?)?;
+    let mut set = LedgerSet::open(mount(context, set_dir)?, context.year_files.clone())?;
     let statements = close_year(&mut set, year)?;
     writeln!(out, "closed {year}")?;
     write_financial_statements(&statements, out)
@@ -218,7 +218,7 @@ fn statements(
     year: i32,
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let set = LedgerSet::open(mount(context, set_dir)?)?;
+    let set = LedgerSet::open(mount(context, set_dir)?, context.year_files.clone())?;
     let statements = financial_statements(&set, year)?;
     write_financial_statements(&statements, out)
 }
@@ -229,7 +229,7 @@ fn sru_compare(
     years: &[i32],
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
-    let set = LedgerSet::open(mount(context, set_dir)?)?;
+    let set = LedgerSet::open(mount(context, set_dir)?, context.year_files.clone())?;
     writeln!(
         out,
         "SRU {}",

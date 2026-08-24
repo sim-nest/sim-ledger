@@ -1,5 +1,10 @@
 #![forbid(unsafe_code)]
 //! Deterministic model mount used only by ledger conformance tests.
+use sim_kernel::{Datum, Symbol};
+use sim_ledger_store_port::{RelationYearFile, StoreError, YearFileFactory};
+use sim_platform_sqlite::{PreopenedStores, SqliteDriver};
+use sim_relation_core::{BaseDomain, DomainCatalog};
+use sim_relation_site::{Driver, Limits, Session};
 use sim_storage_port::{
     Cancellation, HostDirError, HostDirErrorKind, HostDirPort, HostEntry, HostEntryKind, PortResult,
 };
@@ -129,4 +134,90 @@ impl HostDirPort for Prefixed {
             prefix: p,
         }))
     }
+}
+
+/// SQLite adapter used by ledger tests and embedders that deliberately choose
+/// the native SQLite placement. Ledger product code remains provider-neutral.
+#[derive(Clone, Default)]
+pub struct SqliteYearFileFactory;
+
+impl YearFileFactory for SqliteYearFileFactory {
+    fn create(
+        &self,
+        mount: Arc<dyn HostDirPort>,
+        leaf: &str,
+        initial: &[u8],
+    ) -> Result<Box<dyn RelationYearFile>, StoreError> {
+        if mount.metadata(&[leaf.to_owned()])?.is_some() {
+            return Err(StoreError::AlreadyExists);
+        }
+        NativeYearFile::materialize(mount, leaf, initial)
+    }
+    fn open(
+        &self,
+        mount: Arc<dyn HostDirPort>,
+        leaf: &str,
+    ) -> Result<Box<dyn RelationYearFile>, StoreError> {
+        let bytes = mount.read(&[leaf.to_owned()])?;
+        NativeYearFile::materialize(mount, leaf, &bytes)
+    }
+}
+
+struct NativeYearFile {
+    mount: Arc<dyn HostDirPort>,
+    leaf: String,
+    temp: tempfile::NamedTempFile,
+    session: Box<dyn Session>,
+}
+impl NativeYearFile {
+    fn materialize(
+        mount: Arc<dyn HostDirPort>,
+        leaf: &str,
+        bytes: &[u8],
+    ) -> Result<Box<dyn RelationYearFile>, StoreError> {
+        let temp = tempfile::NamedTempFile::new().map_err(host)?;
+        std::fs::write(temp.path(), bytes).map_err(host)?;
+        let domains = DomainCatalog::new([BaseDomain::I64.spec(), BaseDomain::Text.spec()])
+            .map_err(|e| StoreError::Invalid(e.to_string()))?;
+        let reference = Symbol::new("ledger-year");
+        let driver = SqliteDriver::new(
+            domains,
+            PreopenedStores::new([(reference.clone(), temp.path().to_path_buf())]),
+        );
+        let locator = Datum::Node {
+            tag: Symbol::qualified("relation", "preopened"),
+            fields: vec![
+                (Symbol::new("ref"), Datum::Symbol(reference)),
+                (
+                    Symbol::new("access"),
+                    Datum::Symbol(Symbol::new("read-write")),
+                ),
+            ],
+        };
+        let limits = Limits::new(100_000, 1_000_000, 256 * 1024 * 1024, 1_000_000)?;
+        let session = driver.connect(&locator, &limits)?;
+        Ok(Box::new(Self {
+            mount,
+            leaf: leaf.into(),
+            temp,
+            session,
+        }))
+    }
+}
+impl RelationYearFile for NativeYearFile {
+    fn session(&mut self) -> &mut dyn Session {
+        self.session.as_mut()
+    }
+    fn persist(&mut self) -> Result<(), StoreError> {
+        let bytes = std::fs::read(self.temp.path()).map_err(host)?;
+        self.mount.replace(
+            std::slice::from_ref(&self.leaf),
+            &bytes,
+            &sim_storage_port::NeverCancel,
+        )?;
+        Ok(())
+    }
+}
+fn host(e: std::io::Error) -> StoreError {
+    StoreError::Invalid(format!("native test adapter: {e}"))
 }

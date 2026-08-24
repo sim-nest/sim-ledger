@@ -58,9 +58,10 @@ title = "Ledger libraries"
 summary = "Provide mount-backed voucher storage, exact book construction, and closing libraries for ledger workflows."
 owner = "crate/sim-ledger"
 audiences = ["code", "framework"]
-guidance = "Compose LedgerSet and YearStore over the existing sim-storage-port HostDirPort contract. Persistence, imports, reports, ordering, ids, and close state are functions of supplied content; platform crates own native adapters."
+guidance = "Compose LedgerSet over sim-storage-port mounts and an injected sim-ledger-store-port year-file factory. YearStore owns admitted relational schemas and plans behind narrow accounting methods; platform crates own provider placement and native adapters."
 claims_anchors = [
   "anchor/crate/sim-ledger",
+  "anchor/crate/sim-ledger-store-port",
   "anchor/crate/sim-ledger-odb",
   "anchor/crate/sim-lib-ledger-books",
   "anchor/crate/sim-lib-ledger-close",
