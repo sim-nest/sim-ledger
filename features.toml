@@ -106,3 +106,35 @@ steps = [
   { feature = "feature/sim-ledger/ledger-command", why = "The command row owns the operational entry point." },
   { specimen = "recipe/sim-ledger/crates/sim-ledger/01-basics/balanced-year", why = "The balanced-year recipe shows the expected yearly voucher shape." },
 ]
+
+[[feature]]
+id = "feature/sim-ledger/exact-reconciliation"
+title = "Human-decided exact reconciliation"
+summary = "Enumerate bounded exact match candidates, preserve Mia's immutable set decisions, and issue independently recomputable close certificates."
+owner = "crate/sim-ledger"
+audiences = ["code", "framework"]
+guidance = "Freeze ReconciliationInputs, use generate_candidates only to order human review, journal Mia's DecisionRecord values, and call build_certificate plus verify_certificate. A close requires complete singular coverage and an exact zero bridge; correction output remains a balanced draft for separate human approval."
+claims_anchors = [
+  "anchor/crate/sim-ledger",
+  "anchor/rustdoc/sim-ledger/reconciliation",
+  "anchor/rustdoc/sim-ledger/reconciliation/generate_candidates",
+  "anchor/rustdoc/sim-ledger/reconciliation/verify_certificate",
+]
+claims_specimens = [
+  "spec-test/sim-ledger/crates/sim-ledger/src/reconciliation",
+  "recipe/sim-ledger/crates/sim-ledger/01-basics/exact-reconciliation",
+]
+supports = [
+  "feature/sim-ledger/statement-admission",
+  "feature/sim-ledger/ledger-libraries",
+]
+
+[[route]]
+id = "route/verify-ledger-reconciliation"
+task = "Verify an exact ledger reconciliation certificate"
+audiences = ["code", "framework"]
+steps = [
+  { feature = "feature/sim-ledger/statement-admission", why = "Start from a cutoff-frozen canonical statement snapshot." },
+  { feature = "feature/sim-ledger/exact-reconciliation", why = "Reload the frozen inputs and immutable human decisions, then recompute coverage and bridge arithmetic independently." },
+  { specimen = "spec-test/sim-ledger/crates/sim-ledger/src/reconciliation", why = "Mutation and adversarial fixtures prove that altered evidence, duplicate coverage, overflow, and unresolved differences fail closed." },
+]

@@ -1,0 +1,9 @@
+id = "exact-reconciliation"
+title = "Exact reconciliation certificate"
+codec = "lisp"
+setup = "setup.siml"
+purpose = "purpose.md"
+order = 20
+tags = ["ledger", "reconciliation", "certificate", "exact", "sandbox-descriptor"]
+requires = ["ledger/core", "codec/lisp"]
+
