@@ -26,6 +26,8 @@ agent cards never need real bookkeeping data.
 Use the recipe as the shape to look for when reading the API:
 
 - `Amount` stores signed hundredths, not floating-point values.
+- `StatementProfile` admits new bank export layouts as versioned data, producing
+  exact canonical rows and typed refusals at an explicit reconciliation cutoff.
 - `Voucher` groups the posting lines that must balance together.
 - `Account` numbers are year-local, so cross-year reports use reporting codes or
   an explicit mapping instead of assuming a number is global.

@@ -14,6 +14,7 @@ pub mod import;
 pub mod model;
 pub mod report;
 pub mod set;
+pub mod statement;
 pub mod store;
 
 #[cfg(test)]
@@ -32,4 +33,9 @@ pub use model::{
 pub use report::{BalanceKey, BalanceRow, balances};
 pub use set::{IdAllocationError, LedgerSet, SetManifest};
 pub use sim_ledger_store_port::{RelationYearFile, StoreError, YearFileFactory};
+pub use statement::{
+    AmountLayout, CANONICAL_STATEMENT_ROW_VERSION, CanonicalStatementRow, DateFormat,
+    LedgerBalanceAtCutoff, RejectedStatementRow, STATEMENT_PROFILE_VERSION, StatementAdmission,
+    StatementError, StatementProfile, StatementSnapshot, admit_statement,
+};
 pub use store::{YearStore, ledger_schema, legacy_adoption_manifest};
