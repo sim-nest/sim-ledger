@@ -18,7 +18,7 @@ This generated lane consumes `docs/generated/sim-index-fragment.sx`. Global inde
 | Feature | Subject | Specimens | Summary |
 | --- | --- | ---: | --- |
 | `feature/sim-ledger/generated-docs` | `crate/xtask` | 0 | Publish generated package, card, recipe, and index facts for the ledger crates. |
-| `feature/sim-ledger/ledger-command` | `crate/sim-ledger-cli` | 0 | Run ledger import, drafting, trial balance, and closing flows through the loadable command package with supplied mounts and platform time. |
+| `feature/sim-ledger/ledger-command` | `crate/sim-ledger-cli` | 1 | Run ledger import, drafting, trial balance, and closing flows through the loadable command package with supplied mounts and platform time. |
 | `feature/sim-ledger/ledger-libraries` | `crate/sim-ledger` | 1 | Provide mount-backed voucher storage, exact book construction, and closing libraries for ledger workflows. |
 | `feature/sim-ledger/statement-admission` | `crate/sim-ledger` | 1 | Admit delimited bank exports through versioned profile data into exact, cutoff-frozen reconciliation rows with source provenance and typed refusals. |
 | `feature/sim-ledger/exact-reconciliation` | `crate/sim-ledger` | 1 | Enumerate bounded exact match candidates, preserve Mia's immutable set decisions, and issue independently recomputable close certificates. |
@@ -42,6 +42,59 @@ This generated lane consumes `docs/generated/sim-index-fragment.sx`. Global inde
 - `crates/sim-ledger/recipes/book.toml`
 
 ## Worked Examples
+
+### `feature/sim-ledger/ledger-command`
+
+Specimen `spec-test/sim-ledger/crates/sim-ledger-cli/src/tests` is checked by `cargo test`.
+
+Source `crates/sim-ledger-cli/src/tests.rs`:
+
+```rust
+// conformance: ledger commands operate only through supplied mounts and clock context.
+
+use crate::{CommandContext, run};
+use sim_ledger_test_support::{ModelMount, SqliteYearFileFactory};
+use std::{collections::BTreeMap, sync::Arc};
+
+fn context() -> CommandContext {
+    let mount: Arc<dyn sim_storage_port::HostDirPort> = Arc::new(ModelMount::new("cli-model"));
+    CommandContext {
+        ledger_sets: BTreeMap::from([("books".into(), mount)]),
+        imports: BTreeMap::new(),
+        year_files: Arc::new(SqliteYearFileFactory),
+        wall_clock_ns: 1_767_225_600_000_000_000,
+    }
+}
+#[test]
+fn loadable_command_uses_named_model_mount() {
+    let context = context();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(
+        run(
+            &context,
+            ["new", "books", "--label", "Household"],
+            &mut out,
+            &mut err
+        ),
+        0
+    );
+    out.clear();
+    assert_eq!(run(&context, ["years", "books"], &mut out, &mut err), 0);
+    assert!(out.is_empty());
+    assert!(err.is_empty());
+}
+#[test]
+fn absent_mount_fails_without_echoing_a_host_path() {
+    let context = context();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(run(&context, ["years", "missing"], &mut out, &mut err), 1);
+    let text = String::from_utf8(err).unwrap();
+    assert!(text.contains("mount missing is not supplied"));
+    assert!(!text.contains('/'));
+}
+```
 
 ### `feature/sim-ledger/ledger-libraries`
 
