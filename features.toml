@@ -122,7 +122,6 @@ claims_anchors = [
 ]
 claims_specimens = [
   "spec-test/sim-ledger/crates/sim-ledger/src/reconciliation",
-  "recipe/sim-ledger/crates/sim-ledger/01-basics/exact-reconciliation",
 ]
 supports = [
   "feature/sim-ledger/statement-admission",

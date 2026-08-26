@@ -5,6 +5,9 @@
     "crates/sim-ledger/recipes/01-basics/balanced-year/recipe.toml",
     "crates/sim-ledger/recipes/01-basics/balanced-year/setup.siml",
     "crates/sim-ledger/recipes/01-basics/chapter.toml",
+    "crates/sim-ledger/recipes/01-basics/exact-reconciliation/purpose.md",
+    "crates/sim-ledger/recipes/01-basics/exact-reconciliation/recipe.toml",
+    "crates/sim-ledger/recipes/01-basics/exact-reconciliation/setup.siml",
     "crates/sim-ledger/recipes/book.toml"
   ]
 }

@@ -2,4 +2,7 @@
 {"kind":"recipe","path":"crates/sim-ledger/recipes/01-basics/balanced-year/recipe.toml"}
 {"kind":"recipe","path":"crates/sim-ledger/recipes/01-basics/balanced-year/setup.siml"}
 {"kind":"recipe","path":"crates/sim-ledger/recipes/01-basics/chapter.toml"}
+{"kind":"recipe","path":"crates/sim-ledger/recipes/01-basics/exact-reconciliation/purpose.md"}
+{"kind":"recipe","path":"crates/sim-ledger/recipes/01-basics/exact-reconciliation/recipe.toml"}
+{"kind":"recipe","path":"crates/sim-ledger/recipes/01-basics/exact-reconciliation/setup.siml"}
 {"kind":"recipe","path":"crates/sim-ledger/recipes/book.toml"}

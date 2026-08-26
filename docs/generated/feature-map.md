@@ -7,6 +7,8 @@
 | `sim-ledger` | `workspace` | 2 | 0 |
 | `sim-ledger-cli` | `workspace` | 0 | 0 |
 | `sim-ledger-odb` | `workspace` | 0 | 0 |
+| `sim-ledger-store-port` | `workspace` | 0 | 0 |
+| `sim-ledger-test-support` | `workspace` | 0 | 0 |
 | `sim-lib-ledger-books` | `workspace` | 0 | 0 |
 | `sim-lib-ledger-close` | `workspace` | 0 | 0 |
 | `xtask` | `workspace` | 0 | 0 |

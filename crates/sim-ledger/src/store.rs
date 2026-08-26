@@ -20,7 +20,7 @@ use sim_relation_schema::{
     AcceptAllValues, ColumnBuilder, Constraint, ForeignKey, PhysicalColumn, PhysicalSchema,
     PhysicalTable, PrimaryKey, Schema, SchemaBuilder, TableBuilder,
 };
-use sim_relation_site::{Bindings, Limits, RowSink, SiteError};
+use sim_relation_site::{Bindings, Limits, SiteError, VecRowSink};
 use sim_storage_port::HostDirPort;
 use std::{cell::RefCell, fmt, sync::Arc};
 
@@ -306,12 +306,12 @@ impl YearStore {
         )
         .map_err(|e| StoreError::Invalid(e.to_string()))?;
         let bindings = Bindings::new(&empty_type()?, [])?;
-        let mut sink = VecSink::default();
+        let mut sink = VecRowSink::default();
         self.file
             .borrow_mut()
             .session()
             .query(&plan, &bindings, &self.limits, &mut sink)?;
-        Ok(sink.rows)
+        Ok(sink.into_rows())
     }
     pub fn accounts(&self) -> Result<Vec<Account>, StoreError> {
         self.select(
@@ -500,7 +500,7 @@ impl YearStore {
         let bindings = Bindings::new(&empty_type()?, [])?;
         let mut file = self.file.borrow_mut();
         file.session().transaction(&mut |tx| {
-            tx.mutate(&plan, &bindings, &self.limits, &mut VecSink::default())?;
+            tx.mutate(&plan, &bindings, &self.limits, &mut VecRowSink::default())?;
             Ok(())
         })?;
         file.persist()
@@ -567,25 +567,15 @@ impl YearStore {
         )
         .map_err(|e| StoreError::Invalid(e.to_string()))?;
         let bindings = Bindings::new(&empty_type()?, [])?;
-        let mut sink = VecSink::default();
+        let mut sink = VecRowSink::default();
         self.file
             .borrow_mut()
             .session()
             .query(&plan, &bindings, &self.limits, &mut sink)?;
-        Ok(sink.rows)
+        Ok(sink.into_rows())
     }
 }
 
-#[derive(Default)]
-struct VecSink {
-    rows: Vec<Row>,
-}
-impl RowSink for VecSink {
-    fn push(&mut self, r: Row) -> Result<(), SiteError> {
-        self.rows.push(r);
-        Ok(())
-    }
-}
 fn year_leaf(y: i32) -> String {
     format!("year-{y}.sqlite")
 }

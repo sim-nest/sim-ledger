@@ -3,6 +3,8 @@
 //! Candidate scores order review only. They are never accepted implicitly and
 //! this module has no operation that posts a voucher or approves a correction.
 
+// conformance: reconciliation certificates fail closed under altered or incomplete evidence.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 

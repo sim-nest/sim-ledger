@@ -1,6 +1,6 @@
 {
   "generator": "xtask crate-catalog v1",
-  "package_count": 7,
+  "package_count": 8,
   "packages": [
     {
       "description": "Command line imports, reports, close, and draft checks for sim-ledger sets.",
@@ -22,6 +22,18 @@
       "publish": "false",
       "readme": "crates/sim-ledger-odb/README.md",
       "root": "crates/sim-ledger-odb",
+      "target_kinds": [
+        "lib"
+      ]
+    },
+    {
+      "description": "Provider-neutral relational year-file port for SIM ledger.",
+      "generated_readme": false,
+      "manifest": "crates/sim-ledger-store-port/Cargo.toml",
+      "name": "sim-ledger-store-port",
+      "publish": "false",
+      "readme": "crates/sim-ledger-store-port/README.md",
+      "root": "crates/sim-ledger-store-port",
       "target_kinds": [
         "lib"
       ]

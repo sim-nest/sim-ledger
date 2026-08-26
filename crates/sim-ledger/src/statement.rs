@@ -4,6 +4,8 @@
 //! not add a parser implementation. Admission is fail-closed per row and the
 //! returned snapshot contains accepted rows only.
 
+// conformance: statement profiles canonicalize equivalent layouts and reject bad rows.
+
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -150,13 +152,21 @@ pub struct StatementAdmission {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub enum StatementError {
     /// The profile requires an explicit migration before it can be used.
-    UnsupportedProfileVersion { found: u16, supported: u16 },
+    UnsupportedProfileVersion {
+        /// Profile version observed in the input declaration.
+        found: u16,
+        /// Newest profile version supported by this implementation.
+        supported: u16,
+    },
     /// A profile declaration is invalid.
     InvalidProfile(String),
     /// Input was not UTF-8.
     InvalidEncoding,
     /// A row did not contain every declared column.
-    MissingColumn { column: usize },
+    MissingColumn {
+        /// Zero-based index of the first absent declared column.
+        column: usize,
+    },
     /// A required date was empty or invalid.
     MissingOrInvalidDate,
     /// A source identity was empty.
@@ -164,7 +174,12 @@ pub enum StatementError {
     /// A source identity occurred more than once.
     DuplicateSourceIdentity(String),
     /// The row's currency differs from the profile's one declared currency.
-    MixedCurrency { expected: String, found: String },
+    MixedCurrency {
+        /// Currency fixed by the active statement profile.
+        expected: String,
+        /// Conflicting currency observed in the row.
+        found: String,
+    },
     /// The amount used more precision than declared or supported.
     ExcessPrecision,
     /// The amount sign could not be interpreted unambiguously.

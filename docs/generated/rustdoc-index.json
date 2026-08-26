@@ -23,6 +23,13 @@
       "summary": "LibreOffice Base import helpers for sim-ledger."
     },
     {
+      "crate_name": "sim_ledger_store_port",
+      "group": "workspace",
+      "manifest": "crates/sim-ledger-store-port/Cargo.toml",
+      "package": "sim-ledger-store-port",
+      "summary": "Provider-neutral relational year-file contract for ledger persistence."
+    },
+    {
       "crate_name": "sim_ledger_test_support",
       "group": "workspace",
       "manifest": "crates/sim-ledger-test-support/Cargo.toml",
