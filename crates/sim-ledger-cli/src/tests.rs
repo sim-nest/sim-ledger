@@ -1,3 +1,5 @@
+// conformance: ledger commands operate only through supplied mounts and clock context.
+
 use crate::{CommandContext, run};
 use sim_ledger_test_support::{ModelMount, SqliteYearFileFactory};
 use std::{collections::BTreeMap, sync::Arc};

@@ -48,6 +48,9 @@ claims_anchors = [
   "anchor/rustdoc/sim-ledger-cli/crate-root",
   "anchor/rustdoc/sim-ledger-cli/run",
 ]
+claims_specimens = [
+  "spec-test/sim-ledger/crates/sim-ledger-cli/src/tests",
+]
 supports = [
   "feature/sim-ledger/ledger-libraries",
 ]
@@ -62,6 +65,7 @@ guidance = "Compose LedgerSet over sim-storage-port mounts and an injected sim-l
 claims_anchors = [
   "anchor/crate/sim-ledger",
   "anchor/crate/sim-ledger-store-port",
+  "anchor/crate/sim-ledger-test-support",
   "anchor/crate/sim-ledger-odb",
   "anchor/crate/sim-lib-ledger-books",
   "anchor/crate/sim-lib-ledger-close",
@@ -87,7 +91,6 @@ owner = "crate/sim-ledger"
 audiences = ["code", "framework"]
 guidance = "Construct StatementProfile data for each export layout and call admit_statement. Reuse Amount and ledger identities; add a new profile, never institution-specific Rust. Persist or review StatementAdmission only through a storage or office public contract."
 claims_anchors = [
-  "anchor/crate/sim-ledger",
   "anchor/rustdoc/sim-ledger/statement",
   "anchor/rustdoc/sim-ledger/statement/admit_statement",
 ]
@@ -115,7 +118,6 @@ owner = "crate/sim-ledger"
 audiences = ["code", "framework"]
 guidance = "Freeze ReconciliationInputs, use generate_candidates only to order human review, journal Mia's DecisionRecord values, and call build_certificate plus verify_certificate. A close requires complete singular coverage and an exact zero bridge; correction output remains a balanced draft for separate human approval."
 claims_anchors = [
-  "anchor/crate/sim-ledger",
   "anchor/rustdoc/sim-ledger/reconciliation",
   "anchor/rustdoc/sim-ledger/reconciliation/generate_candidates",
   "anchor/rustdoc/sim-ledger/reconciliation/verify_certificate",
