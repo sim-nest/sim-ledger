@@ -11,7 +11,7 @@ readme = "README.md"
 [dependencies]
 sim-storage-port = { version = "0.1.0" }
 sim-ledger-store-port = { path = "../sim-ledger-store-port" }
-sim-kernel = { version = "0.2.0" }
+sim-kernel = { version = "0.3.0" }
 sim-platform-sqlite = { version = "0.1.0" }
 sim-relation-core = { version = "0.1.0" }
 sim-relation-site = { version = "0.1.0" }

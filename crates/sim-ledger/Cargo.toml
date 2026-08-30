@@ -22,8 +22,8 @@ sim-relation-plan = { version = "0.1.0" }
 sim-relation-schema = { version = "0.1.0" }
 sim-relation-site = { version = "0.1.0" }
 sim-ledger-store-port = { path = "../sim-ledger-store-port" }
-sim-codec = { version = "0.1.4", optional = true }
-sim-kernel = { version = "0.2.0" }
+sim-codec = { version = "0.2.0", optional = true }
+sim-kernel = { version = "0.3.0" }
 toml = "0.8"
 
 [dev-dependencies]
