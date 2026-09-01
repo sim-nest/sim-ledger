@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::fs;
 use std::num::TryFromIntError;
 
 use crate::model::{Account, Amount, BalanceError, Posting, Voucher, voucher_balance_violations};
@@ -55,15 +54,10 @@ pub struct SourcePosting {
 /// Failure while importing one source year.
 #[derive(Debug)]
 pub enum ImportError {
-    /// Filesystem failure.
-    Io {
-        /// Original filesystem error.
-        source: Box<std::io::Error>,
-    },
-    /// SQLite storage failure.
+    /// Supplied storage failure.
     Store {
-        /// Original SQLite error.
-        source: Box<rusqlite::Error>,
+        /// Sanitized storage error.
+        source: Box<crate::StoreError>,
     },
     /// The set already contains the requested year.
     YearAlreadyImported {
@@ -116,8 +110,7 @@ pub enum ImportError {
 impl fmt::Display for ImportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ImportError::Io { source } => write!(f, "filesystem import failure: {source}"),
-            ImportError::Store { source } => write!(f, "SQLite import failure: {source}"),
+            ImportError::Store { source } => write!(f, "ledger storage failure: {source}"),
             ImportError::YearAlreadyImported { year } => {
                 write!(f, "ledger year {year} is already imported")
             }
@@ -156,7 +149,6 @@ impl fmt::Display for ImportError {
 impl std::error::Error for ImportError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            ImportError::Io { source } => Some(source.as_ref()),
             ImportError::Store { source } => Some(source.as_ref()),
             ImportError::IdAllocation { source } => Some(source),
             _ => None,
@@ -164,16 +156,8 @@ impl std::error::Error for ImportError {
     }
 }
 
-impl From<std::io::Error> for ImportError {
-    fn from(source: std::io::Error) -> ImportError {
-        ImportError::Io {
-            source: Box::new(source),
-        }
-    }
-}
-
-impl From<rusqlite::Error> for ImportError {
-    fn from(source: rusqlite::Error) -> ImportError {
+impl From<crate::StoreError> for ImportError {
+    fn from(source: crate::StoreError) -> ImportError {
         ImportError::Store {
             source: Box::new(source),
         }
@@ -296,15 +280,8 @@ fn write_imported_year(
     vouchers: &[Voucher],
     postings: &[Posting],
 ) -> Result<(), ImportError> {
-    let path = set.year_path(year);
-    let store = YearStore::create(&path, year)?;
-    let result = write_rows(&store, set, year, accounts, vouchers, postings);
-    if let Err(err) = result {
-        drop(store);
-        let _ = fs::remove_file(path);
-        return Err(err);
-    }
-    Ok(())
+    let store = set.create_year_store(year)?;
+    write_rows(&store, set, year, accounts, vouchers, postings)
 }
 
 fn write_rows(

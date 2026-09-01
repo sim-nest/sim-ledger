@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use sim_ledger::{BalanceKey, LedgerSet, YearStore, balances};
+use sim_ledger::{BalanceKey, LedgerSet, balances};
 
 use crate::trial_balance::{TrialBalanceRow, trial_balance};
 use crate::{CloseError, checked_i64};
@@ -157,7 +157,7 @@ pub fn compare_by_sru(
 }
 
 fn ensure_vouchers_balanced(set: &LedgerSet, year: i32) -> Result<(), CloseError> {
-    let store = YearStore::open(&set.year_path(year))?;
+    let store = set.year_store(year)?;
     if let Some(violation) = store.voucher_balance_violations()?.into_iter().next() {
         return Err(CloseError::UnbalancedVoucher {
             voucher: violation.voucher_id,

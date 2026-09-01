@@ -3,7 +3,10 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+use sim_ledger::YearFileFactory;
+use sim_storage_port::HostDirPort;
 use std::io::Write;
+use std::{collections::BTreeMap, sync::Arc};
 
 mod args;
 mod commands;
@@ -16,7 +19,20 @@ mod tests;
 ///
 /// The returned integer is a process exit status: `0` for success, `1` for a
 /// runtime error, and `2` for usage errors.
-pub fn run<I, S>(args: I, out: &mut dyn Write, err: &mut dyn Write) -> i32
+/// Explicit mounts and services supplied to one command invocation.
+pub struct CommandContext {
+    /// Opaque command names mapped to ledger-set mounts.
+    pub ledger_sets: BTreeMap<String, Arc<dyn HostDirPort>>,
+    /// Opaque command names mapped to supplied import content.
+    pub imports: BTreeMap<String, Arc<dyn HostDirPort>>,
+    /// Provider-neutral factory for private relational year sessions.
+    pub year_files: Arc<dyn YearFileFactory>,
+    /// Deterministic wall-clock nanoseconds supplied by the active platform.
+    pub wall_clock_ns: i128,
+}
+
+/// Parse and execute one loadable ledger command against supplied services.
+pub fn run<I, S>(context: &CommandContext, args: I, out: &mut dyn Write, err: &mut dyn Write) -> i32
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
@@ -32,7 +48,7 @@ where
         }
     };
 
-    match commands::execute(command, out) {
+    match commands::execute(context, command, out) {
         Ok(()) => 0,
         Err(error) => {
             let _ = writeln!(err, "error: {error}");

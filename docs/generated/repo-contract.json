@@ -32,6 +32,8 @@
       "sim-ledger",
       "sim-ledger-cli",
       "sim-ledger-odb",
+      "sim-ledger-store-port",
+      "sim-ledger-test-support",
       "sim-lib-ledger-books",
       "sim-lib-ledger-close",
       "xtask"
@@ -39,11 +41,26 @@
   },
   "non_citizen_exemption_count": 0,
   "non_citizen_exemptions": [],
-  "package_count": 6,
+  "package_count": 8,
   "packages": [
     {
       "crate_name": "sim_ledger",
-      "dependencies": [],
+      "dependencies": [
+        {
+          "kind": "dev",
+          "optional": false,
+          "package": "sim-ledger-test-support",
+          "rename": null,
+          "target": null
+        },
+        {
+          "kind": "normal",
+          "optional": false,
+          "package": "sim-ledger-store-port",
+          "rename": null,
+          "target": null
+        }
+      ],
       "description": "Yearly ledger records and exact amount helpers.",
       "features": [
         {
@@ -53,8 +70,7 @@
         },
         {
           "edges": [
-            "dep:sim-codec",
-            "dep:sim-kernel"
+            "dep:sim-codec"
           ],
           "name": "sim",
           "workspace_edges": []
@@ -85,6 +101,13 @@
     {
       "crate_name": "sim_ledger_cli",
       "dependencies": [
+        {
+          "kind": "dev",
+          "optional": false,
+          "package": "sim-ledger-test-support",
+          "rename": null,
+          "target": null
+        },
         {
           "kind": "normal",
           "optional": false,
@@ -123,7 +146,6 @@
       "root": "crates/sim-ledger-cli",
       "rustdoc_summary": "Command line runner for yearly ledger sets.",
       "target_kinds": [
-        "bin",
         "lib"
       ],
       "targets": [
@@ -136,16 +158,6 @@
           ],
           "name": "sim_ledger_cli",
           "src": "crates/sim-ledger-cli/src/lib.rs"
-        },
-        {
-          "crate_types": [
-            "bin"
-          ],
-          "kind": [
-            "bin"
-          ],
-          "name": "ledger",
-          "src": "crates/sim-ledger-cli/src/main.rs"
         }
       ]
     },
@@ -181,6 +193,68 @@
           ],
           "name": "sim_ledger_odb",
           "src": "crates/sim-ledger-odb/src/lib.rs"
+        }
+      ]
+    },
+    {
+      "crate_name": "sim_ledger_store_port",
+      "dependencies": [],
+      "description": "Provider-neutral relational year-file port for SIM ledger",
+      "features": [],
+      "group": "workspace",
+      "manifest": "crates/sim-ledger-store-port/Cargo.toml",
+      "name": "sim-ledger-store-port",
+      "publish": "false",
+      "root": "crates/sim-ledger-store-port",
+      "rustdoc_summary": "Provider-neutral relational year-file contract for ledger persistence.",
+      "target_kinds": [
+        "lib"
+      ],
+      "targets": [
+        {
+          "crate_types": [
+            "lib"
+          ],
+          "kind": [
+            "lib"
+          ],
+          "name": "sim_ledger_store_port",
+          "src": "crates/sim-ledger-store-port/src/lib.rs"
+        }
+      ]
+    },
+    {
+      "crate_name": "sim_ledger_test_support",
+      "dependencies": [
+        {
+          "kind": "normal",
+          "optional": false,
+          "package": "sim-ledger-store-port",
+          "rename": null,
+          "target": null
+        }
+      ],
+      "description": "Deterministic model mounts for ledger conformance tests",
+      "features": [],
+      "group": "workspace",
+      "manifest": "crates/sim-ledger-test-support/Cargo.toml",
+      "name": "sim-ledger-test-support",
+      "publish": "false",
+      "root": "crates/sim-ledger-test-support",
+      "rustdoc_summary": "Deterministic model mount used only by ledger conformance tests.",
+      "target_kinds": [
+        "lib"
+      ],
+      "targets": [
+        {
+          "crate_types": [
+            "lib"
+          ],
+          "kind": [
+            "lib"
+          ],
+          "name": "sim_ledger_test_support",
+          "src": "crates/sim-ledger-test-support/src/lib.rs"
         }
       ]
     },
@@ -222,6 +296,13 @@
     {
       "crate_name": "sim_lib_ledger_close",
       "dependencies": [
+        {
+          "kind": "dev",
+          "optional": false,
+          "package": "sim-ledger-test-support",
+          "rename": null,
+          "target": null
+        },
         {
           "kind": "normal",
           "optional": false,
@@ -287,10 +368,10 @@
     "generated_by": "cargo run -p xtask -- simdoc",
     "generation_timestamp": "2026-07-15T01:30:21+02:00",
     "generator": "xtask repo-contract v1",
-    "git_commit": "be788aa4637ee0177a17ee69a89b68804cb37ffa",
+    "git_commit": "3cd7cbd2d675e59ebef6e05e359502a00c8081df",
     "repo": "sim-ledger",
     "schema": "sim.provenance.v1",
-    "source_commit": "be788aa4637ee0177a17ee69a89b68804cb37ffa",
+    "source_commit": "3cd7cbd2d675e59ebef6e05e359502a00c8081df",
     "source_remote": "https://github.com/sim-nest/sim-ledger",
     "validation_commands": [
       "cargo fmt --all --check",
@@ -303,13 +384,14 @@
       "cargo run -p xtask -- validation-matrix --check --repo .",
       "cargo run -p xtask -- crate-catalog --check --repo ."
     ],
-    "workspace_hash": "c4128646875721d2",
+    "workspace_hash": "884e46c1cbcb59d1",
     "workspace_hash_algorithm": "fnv1a64",
-    "workspace_hash_input_count": 44,
+    "workspace_hash_input_count": 49,
     "workspace_hash_inputs": [
       "Cargo.toml",
       "crates/sim-ledger/Cargo.toml",
       "crates/sim-ledger/recipes/01-basics/balanced-year/recipe.toml",
+      "crates/sim-ledger/recipes/01-basics/exact-reconciliation/recipe.toml",
       "crates/sim-ledger/recipes/book.toml",
       "crates/sim-ledger/src/codec.rs",
       "crates/sim-ledger/src/cookbook.rs",
@@ -317,15 +399,16 @@
       "crates/sim-ledger/src/import_tests.rs",
       "crates/sim-ledger/src/lib.rs",
       "crates/sim-ledger/src/model.rs",
+      "crates/sim-ledger/src/reconciliation.rs",
       "crates/sim-ledger/src/report.rs",
       "crates/sim-ledger/src/set.rs",
+      "crates/sim-ledger/src/statement.rs",
       "crates/sim-ledger/src/store.rs",
       "crates/sim-ledger-cli/Cargo.toml",
       "crates/sim-ledger-cli/src/args.rs",
       "crates/sim-ledger-cli/src/commands.rs",
       "crates/sim-ledger-cli/src/error.rs",
       "crates/sim-ledger-cli/src/lib.rs",
-      "crates/sim-ledger-cli/src/main.rs",
       "crates/sim-ledger-cli/src/tests.rs",
       "crates/sim-ledger-odb/Cargo.toml",
       "crates/sim-ledger-odb/src/csv.rs",
@@ -335,9 +418,12 @@
       "crates/sim-ledger-odb/src/hsqldb/table.rs",
       "crates/sim-ledger-odb/src/lib.rs",
       "crates/sim-ledger-odb/src/odb.rs",
-      "crates/sim-ledger-odb/src/odb_tests.rs",
       "crates/sim-ledger-odb/src/script.rs",
       "crates/sim-ledger-odb/src/zip_member.rs",
+      "crates/sim-ledger-store-port/Cargo.toml",
+      "crates/sim-ledger-store-port/src/lib.rs",
+      "crates/sim-ledger-test-support/Cargo.toml",
+      "crates/sim-ledger-test-support/src/lib.rs",
       "crates/sim-lib-ledger-books/Cargo.toml",
       "crates/sim-lib-ledger-books/src/lib.rs",
       "crates/sim-lib-ledger-books/src/profile.rs",
@@ -361,7 +447,7 @@
       "card_id": "cookbook/ledger/core",
       "group": "workspace",
       "package": "sim-ledger",
-      "recipe_count": 1,
+      "recipe_count": 2,
       "recipes": [
         {
           "card_id": "ledger/core/01-basics/balanced-year",
@@ -370,6 +456,14 @@
           "package": "sim-ledger",
           "recipe_toml": "crates/sim-ledger/recipes/01-basics/balanced-year/recipe.toml",
           "title": "Balanced yearly voucher"
+        },
+        {
+          "card_id": "ledger/core/01-basics/exact-reconciliation",
+          "codec": "lisp",
+          "id": "exact-reconciliation",
+          "package": "sim-ledger",
+          "recipe_toml": "crates/sim-ledger/recipes/01-basics/exact-reconciliation/recipe.toml",
+          "title": "Exact reconciliation certificate"
         }
       ],
       "summary": "Exact yearly ledger records and balance checks.",

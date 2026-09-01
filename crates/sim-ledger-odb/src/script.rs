@@ -1,19 +1,24 @@
-//! HSQLDB script metadata parsing.
+//! Admission of SQL-codec HSQLDB schema drafts into the ledger importer domain.
 
 use std::collections::HashMap;
+use std::fmt;
+
+use sim_codec_sql::{DdlCodec, LegacyDdl, SchemaDraft, SqlError};
 
 /// Parsed table layout and id high-water marks from `database/script`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OdbSchema {
     /// Column layout by table name.
     pub columns: HashMap<String, Vec<(String, ColType)>>,
+    /// Primary-key columns by table name.
+    pub primary_keys: HashMap<String, Vec<String>>,
     /// Next id by table name.
     pub restart: HashMap<String, i64>,
     /// Real index root offsets by table name.
     pub index_roots: HashMap<String, Vec<i64>>,
 }
 
-/// HSQLDB column types used by the ledger tables.
+/// HSQLDB column domains admitted by the ledger importer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColType {
     /// Integer column.
@@ -26,148 +31,129 @@ pub enum ColType {
     Numeric,
 }
 
-/// Parse HSQLDB table layouts, index roots, and `RESTART WITH` id counters.
-#[must_use]
-pub fn parse_script(script: &str) -> OdbSchema {
-    let mut schema = OdbSchema::default();
-    for line in script
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        if let Some((table, columns)) = parse_create_table(line) {
-            schema.columns.insert(table, columns);
-        }
-        if let Some((table, next)) = parse_restart(line) {
-            schema.restart.insert(table, next);
-        }
-        if let Some((table, roots)) = parse_index_roots(line) {
-            schema.index_roots.insert(table, roots);
-        }
-    }
-    schema
+/// Failure to decode or admit an HSQLDB schema script.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SchemaError {
+    /// The SQL codec rejected syntax outside its bounded HSQLDB grammar.
+    Ddl(SqlError),
+    /// A codec draft used a storage domain the importer does not support.
+    UnsupportedDomain {
+        /// Table containing the column.
+        table: String,
+        /// Column with the unsupported domain.
+        column: String,
+        /// Normalized SQL storage spelling.
+        storage_type: String,
+    },
 }
 
-fn parse_create_table(line: &str) -> Option<(String, Vec<(String, ColType)>)> {
-    let upper = line.to_ascii_uppercase();
-    let table_pos = upper.find(" TABLE ")?;
-    let after_table = line[table_pos + " TABLE ".len()..].trim_start();
-    let (table, rest) = parse_quoted(after_table)?;
-    let open = rest.find('(')?;
-    let close = rest.rfind(')')?;
-    let body = &rest[open + 1..close];
-    let columns = split_top_level_commas(body)
-        .into_iter()
-        .filter_map(parse_column)
-        .collect();
-    Some((table, columns))
-}
-
-fn parse_column(part: &str) -> Option<(String, ColType)> {
-    let (name, rest) = parse_quoted(part.trim())?;
-    let ty = rest.trim_start().to_ascii_uppercase();
-    let col_type = if ty.starts_with("INTEGER") {
-        ColType::Integer
-    } else if ty.starts_with("VARCHAR") || ty.starts_with("CHAR") || ty.starts_with("LONGVARCHAR") {
-        ColType::Varchar
-    } else if ty.starts_with("DATE") {
-        ColType::Date
-    } else if ty.starts_with("NUMERIC") || ty.starts_with("DECIMAL") {
-        ColType::Numeric
-    } else {
-        return None;
-    };
-    Some((name, col_type))
-}
-
-fn parse_restart(line: &str) -> Option<(String, i64)> {
-    let upper = line.to_ascii_uppercase();
-    if !upper.starts_with("ALTER TABLE ") {
-        return None;
-    }
-    let (table, _) = parse_quoted(line["ALTER TABLE ".len()..].trim_start())?;
-    let restart_pos = upper.find(" RESTART WITH ")? + " RESTART WITH ".len();
-    let next = line[restart_pos..]
-        .split_whitespace()
-        .next()?
-        .trim_end_matches(';')
-        .parse()
-        .ok()?;
-    Some((table, next))
-}
-
-fn parse_index_roots(line: &str) -> Option<(String, Vec<i64>)> {
-    let upper = line.to_ascii_uppercase();
-    if !upper.starts_with("SET TABLE ") {
-        return None;
-    }
-    let (table, rest) = parse_quoted(line["SET TABLE ".len()..].trim_start())?;
-    let index_pos = rest.to_ascii_uppercase().find(" INDEX'")? + " INDEX'".len();
-    let roots_text = &rest[index_pos..];
-    let end = roots_text.find('\'')?;
-    let mut roots = roots_text[..end]
-        .split_whitespace()
-        .map(str::parse)
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    roots.pop();
-    Some((table, roots))
-}
-
-fn parse_quoted(input: &str) -> Option<(String, &str)> {
-    let input = input.strip_prefix('"')?;
-    let end = input.find('"')?;
-    Some((input[..end].to_owned(), &input[end + 1..]))
-}
-
-fn split_top_level_commas(input: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut start = 0;
-    let mut depth = 0_i32;
-    for (index, byte) in input.bytes().enumerate() {
-        match byte {
-            b'(' => depth += 1,
-            b')' => depth -= 1,
-            b',' if depth == 0 => {
-                parts.push(input[start..index].trim());
-                start = index + 1;
+impl fmt::Display for SchemaError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ddl(error) => write!(
+                f,
+                "HSQLDB DDL is outside the bounded SQL codec grammar: {error}"
+            ),
+            Self::UnsupportedDomain {
+                table,
+                column,
+                storage_type,
+            } => {
+                write!(
+                    f,
+                    "unsupported HSQLDB domain {storage_type} for {table}.{column}"
+                )
             }
-            _ => {}
         }
     }
-    parts.push(input[start..].trim());
-    parts
+}
+
+impl std::error::Error for SchemaError {}
+
+/// Decode with the one SQL grammar owner, then admit storage types against the
+/// ledger importer's closed domain catalog.
+pub fn parse_script(script: &str) -> Result<OdbSchema, SchemaError> {
+    let draft = DdlCodec
+        .decode(script, LegacyDdl::Hsqldb)
+        .map_err(SchemaError::Ddl)?;
+    admit_draft(&draft)
+}
+
+fn admit_draft(draft: &SchemaDraft) -> Result<OdbSchema, SchemaError> {
+    let mut schema = OdbSchema::default();
+    for table in &draft.tables {
+        let columns = table
+            .columns
+            .iter()
+            .map(|column| {
+                let storage = column.storage_type.as_str();
+                let domain = if storage == "INTEGER" {
+                    ColType::Integer
+                } else if storage.starts_with("VARCHAR")
+                    || storage.starts_with("CHAR")
+                    || storage == "LONGVARCHAR"
+                {
+                    ColType::Varchar
+                } else if storage == "DATE" {
+                    ColType::Date
+                } else if storage.starts_with("NUMERIC") || storage.starts_with("DECIMAL") {
+                    ColType::Numeric
+                } else {
+                    return Err(SchemaError::UnsupportedDomain {
+                        table: table.name.clone(),
+                        column: column.name.clone(),
+                        storage_type: storage.to_owned(),
+                    });
+                };
+                Ok((column.name.clone(), domain))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        schema.columns.insert(table.name.clone(), columns);
+        schema
+            .primary_keys
+            .insert(table.name.clone(), table.primary_key.clone());
+        if let Some(next) = table.restart_with {
+            schema.restart.insert(table.name.clone(), next);
+        }
+        if !table.index_roots.is_empty() {
+            schema
+                .index_roots
+                .insert(table.name.clone(), table.index_roots.clone());
+        }
+    }
+    Ok(schema)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_real_ledger_table_lines() {
-        let schema = parse_script(
-            r#"
-CREATE CACHED TABLE "konto"("k_nr" INTEGER NOT NULL PRIMARY KEY,"k_namn" VARCHAR(50),"k_text" VARCHAR(200),"k_sru_p" INTEGER,"k_sru_m" INTEGER)
+    const LEDGER_DDL: &str = r#"CREATE CACHED TABLE "konto"("k_nr" INTEGER NOT NULL PRIMARY KEY,"k_namn" VARCHAR(50),"k_text" VARCHAR(200),"k_sru_p" INTEGER,"k_sru_m" INTEGER)
 CREATE CACHED TABLE "ver"("v_nr" INTEGER NOT NULL PRIMARY KEY,"v_datum" DATE NOT NULL,"v_text" VARCHAR(200))
 CREATE CACHED TABLE "trans"("t_nr" INTEGER NOT NULL PRIMARY KEY,"t_ver" INTEGER NOT NULL,"t_konto" INTEGER NOT NULL,"t_belopp" NUMERIC(50,2) NOT NULL,"t_text" VARCHAR(200))
 ALTER TABLE "ver" ALTER COLUMN "v_nr" RESTART WITH 11612
 ALTER TABLE "trans" ALTER COLUMN "t_nr" RESTART WITH 25471
-SET TABLE "trans" INDEX'134576 94648 47888 25471'
-"#,
-        );
+SET TABLE "trans" INDEX'134576 94648 47888 25471'"#;
 
+    #[test]
+    fn admits_the_complete_ledger_fixture_schema() {
+        let schema = parse_script(LEDGER_DDL).unwrap();
         assert_eq!(schema.restart["ver"], 11_612);
         assert_eq!(schema.restart["trans"], 25_471);
-        assert_eq!(
-            schema.columns["konto"],
-            vec![
-                ("k_nr".to_owned(), ColType::Integer),
-                ("k_namn".to_owned(), ColType::Varchar),
-                ("k_text".to_owned(), ColType::Varchar),
-                ("k_sru_p".to_owned(), ColType::Integer),
-                ("k_sru_m".to_owned(), ColType::Integer),
-            ]
-        );
-        assert_eq!(schema.index_roots["trans"], vec![134_576, 94_648, 47_888]);
+        assert_eq!(schema.primary_keys["konto"], ["k_nr"]);
+        assert_eq!(schema.columns["konto"].len(), 5);
+        assert_eq!(schema.index_roots["trans"], [134_576, 94_648, 47_888]);
+    }
+
+    #[test]
+    fn refuses_unknown_sql_and_unknown_import_domains() {
+        assert!(matches!(
+            parse_script("DROP TABLE ledger"),
+            Err(SchemaError::Ddl(_))
+        ));
+        assert!(matches!(
+            parse_script("CREATE CACHED TABLE t (payload BLOB)"),
+            Err(SchemaError::UnsupportedDomain { .. })
+        ));
     }
 }

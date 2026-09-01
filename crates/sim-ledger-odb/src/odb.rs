@@ -3,14 +3,13 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::io;
-use std::path::Path;
 use std::str;
 
 use sim_ledger::{Account, Amount, SourcePosting, SourceVoucher, SourceYear};
 
 use crate::hsqldb::{Cell, HsqlError, read_table};
 use crate::open_zip_member;
-use crate::script::{OdbSchema, parse_script};
+use crate::script::{OdbSchema, SchemaError, parse_script};
 
 const SCRIPT: &str = "database/script";
 const DATA: &str = "database/data";
@@ -19,6 +18,11 @@ const PROPERTIES: &str = "database/properties";
 /// Failure while reading an ODB ledger export.
 #[derive(Debug)]
 pub enum OdbError {
+    /// The HSQLDB schema script failed bounded decoding or domain admission.
+    Schema {
+        /// Original schema failure.
+        source: SchemaError,
+    },
     /// ZIP or filesystem failure.
     Io {
         /// Original IO error.
@@ -94,6 +98,7 @@ pub enum OdbError {
 impl fmt::Display for OdbError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            OdbError::Schema { source } => write!(f, "invalid ODB schema: {source}"),
             OdbError::Io { source } => write!(f, "ODB IO failure: {source}"),
             OdbError::Utf8 { member, source } => {
                 write!(f, "ODB member {member} is not UTF-8: {source}")
@@ -143,6 +148,7 @@ impl fmt::Display for OdbError {
 impl std::error::Error for OdbError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            OdbError::Schema { source } => Some(source),
             OdbError::Io { source } => Some(source),
             OdbError::Utf8 { source, .. } => Some(source),
             OdbError::Hsql { source, .. } => Some(source),
@@ -158,24 +164,10 @@ impl From<io::Error> for OdbError {
 }
 
 /// Read a LibreOffice Base `.odb` ledger export for an explicit ledger year.
-pub fn read_odb_for_year(path: &Path, year: i32) -> Result<SourceYear, OdbError> {
-    read_odb_inner(path, year)
-}
-
-/// Read a LibreOffice Base `.odb` ledger export into a source year.
-///
-/// This convenience entry point infers the ledger year from trailing digits in
-/// the file stem. Use [`read_odb_for_year`] when the caller already has an
-/// authoritative year.
-pub fn read_odb(path: &Path) -> Result<SourceYear, OdbError> {
-    let year = year_from_path(path)?;
-    read_odb_inner(path, year)
-}
-
-fn read_odb_inner(path: &Path, year: i32) -> Result<SourceYear, OdbError> {
-    let script_bytes = open_zip_member(path, SCRIPT)?;
-    let data = open_zip_member(path, DATA)?;
-    let properties_bytes = open_zip_member(path, PROPERTIES)?;
+pub fn read_odb_for_year(bytes: &[u8], year: i32) -> Result<SourceYear, OdbError> {
+    let script_bytes = open_zip_member(bytes, SCRIPT)?;
+    let data = open_zip_member(bytes, DATA)?;
+    let properties_bytes = open_zip_member(bytes, PROPERTIES)?;
     let script = str::from_utf8(&script_bytes).map_err(|source| OdbError::Utf8 {
         member: SCRIPT,
         source,
@@ -186,7 +178,7 @@ fn read_odb_inner(path: &Path, year: i32) -> Result<SourceYear, OdbError> {
     })?;
     ensure_cache_scale_one(properties)?;
 
-    let schema = parse_script(script);
+    let schema = parse_script(script).map_err(|source| OdbError::Schema { source })?;
     let accounts = read_accounts(&data, &schema)?;
     let vouchers = read_vouchers(&data, &schema)?;
     let postings = read_postings(&data, &schema)?;
@@ -464,21 +456,4 @@ fn cell<'a>(
         .ok_or(OdbError::MissingColumn { table, column })?;
     row.get(index)
         .ok_or(OdbError::MissingColumn { table, column })
-}
-
-fn year_from_path(path: &Path) -> Result<i32, OdbError> {
-    let stem = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .ok_or(OdbError::MissingYear)?;
-    let digits_rev: String = stem
-        .chars()
-        .rev()
-        .take_while(char::is_ascii_digit)
-        .collect();
-    if digits_rev.is_empty() {
-        return Err(OdbError::MissingYear);
-    }
-    let year = digits_rev.chars().rev().collect::<String>();
-    year.parse().map_err(|_| OdbError::MissingYear)
 }

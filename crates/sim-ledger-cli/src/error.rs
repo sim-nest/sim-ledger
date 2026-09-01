@@ -1,5 +1,4 @@
 use std::fmt;
-use std::path::PathBuf;
 
 use sim_ledger::{IdAllocationError, ImportError};
 use sim_ledger_odb::{CsvLoadError, OdbError};
@@ -8,6 +7,7 @@ use sim_lib_ledger_close::CloseError;
 
 #[derive(Debug)]
 pub(crate) enum CliError {
+    Store(sim_ledger::StoreError),
     Io(std::io::Error),
     Report(String),
     Import(ImportError),
@@ -16,7 +16,7 @@ pub(crate) enum CliError {
     Csv(CsvLoadError),
     Odb(OdbError),
     CsvScriptMissing {
-        dir: PathBuf,
+        mount: String,
     },
     CountOverflow {
         row_kind: &'static str,
@@ -31,7 +31,8 @@ impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CliError::Io(source) => write!(f, "{source}"),
-            CliError::Report(source) => write!(f, "SQLite report failure: {source}"),
+            CliError::Store(source) => write!(f, "ledger storage failure: {source}"),
+            CliError::Report(source) => write!(f, "ledger report failure: {source}"),
             CliError::Import(ImportError::Unbalanced {
                 voucher,
                 posting_count,
@@ -45,10 +46,9 @@ impl fmt::Display for CliError {
             CliError::Books(source) => write!(f, "{source}"),
             CliError::Csv(source) => write!(f, "{source}"),
             CliError::Odb(source) => write!(f, "{source}"),
-            CliError::CsvScriptMissing { dir } => write!(
+            CliError::CsvScriptMissing { mount } => write!(
                 f,
-                "CSV import directory {} must contain database/script or script",
-                dir.display()
+                "CSV import mount {mount} must contain database/script or script"
             ),
             CliError::CountOverflow { row_kind, count } => {
                 write!(f, "{row_kind} count {count} cannot fit in i64")
@@ -64,6 +64,7 @@ impl std::error::Error for CliError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             CliError::Io(source) => Some(source),
+            CliError::Store(source) => Some(source),
             CliError::Report(_) => None,
             CliError::Import(source) => Some(source),
             CliError::Close(source) => Some(source),
@@ -79,6 +80,11 @@ impl std::error::Error for CliError {
 impl From<std::io::Error> for CliError {
     fn from(source: std::io::Error) -> CliError {
         CliError::Io(source)
+    }
+}
+impl From<sim_ledger::StoreError> for CliError {
+    fn from(source: sim_ledger::StoreError) -> Self {
+        Self::Store(source)
     }
 }
 

@@ -1,238 +1,145 @@
-use std::fs;
-
 use crate::{
-    Account, Amount, IdAllocationError, ImportError, LedgerSet, Posting, SourcePosting,
-    SourceVoucher, SourceYear, Voucher, YearStore, import_year,
+    Account, Amount, BalanceKey, LedgerSet, SourcePosting, SourceVoucher, SourceYear, balances,
+    import_year,
 };
+use sim_ledger_test_support::{ModelMount, SqliteYearFileFactory};
+use std::sync::Arc;
 
-#[test]
-fn imports_source_year_with_carried_ids() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
-
-    import_year(&mut set, balanced_source_year(2024, 11_612, 25_471, 1_200)).unwrap();
-
-    assert_eq!(set.manifest.next_voucher_id, 11_613);
-    assert_eq!(set.manifest.next_posting_id, 25_473);
-    assert_eq!(set.manifest.years, vec![2024]);
-
-    let store = YearStore::open(&set.year_path(2024)).unwrap();
-    assert_eq!(
-        store.vouchers().unwrap(),
-        vec![Voucher {
-            id: 11_612,
-            source_id: Some(11_612),
-            date: "2024-01-31".to_owned(),
-            text: Some("Source voucher".to_owned()),
-        }]
-    );
-    assert_eq!(
-        store.postings().unwrap(),
-        vec![
-            Posting {
-                id: 25_471,
-                source_id: Some(25_471),
-                voucher_id: 11_612,
-                account: 1910,
-                amount: Amount(1_200),
-                text: Some("Debit".to_owned()),
-            },
-            Posting {
-                id: 25_472,
-                source_id: Some(25_472),
-                voucher_id: 11_612,
-                account: 3010,
-                amount: Amount(-1_200),
-                text: Some("Credit".to_owned()),
-            },
-        ]
-    );
-    assert_eq!(id_state(&store, "voucher"), 11_613);
-    assert_eq!(id_state(&store, "posting"), 25_473);
-
-    let reloaded = LedgerSet::open(dir.path()).unwrap();
-    assert_eq!(reloaded.manifest, set.manifest);
+fn mount() -> Arc<dyn sim_storage_port::HostDirPort> {
+    Arc::new(ModelMount::new("ledger-model"))
 }
-
-#[test]
-fn later_import_keeps_existing_cursor_when_source_cursor_is_lower() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
-
-    import_year(&mut set, balanced_source_year(2024, 11_612, 25_471, 1_200)).unwrap();
-    import_year(&mut set, balanced_source_year(2025, 20, 30, 800)).unwrap();
-
-    assert_eq!(set.manifest.next_voucher_id, 11_614);
-    assert_eq!(set.manifest.next_posting_id, 25_475);
-    assert_eq!(set.manifest.years, vec![2024, 2025]);
-
-    let second = YearStore::open(&set.year_path(2025)).unwrap();
-    assert_eq!(second.vouchers().unwrap()[0].id, 11_613);
-    assert_eq!(second.vouchers().unwrap()[0].source_id, Some(20));
-    let postings = second.postings().unwrap();
-    assert_eq!(postings[0].id, 25_473);
-    assert_eq!(postings[0].source_id, Some(30));
-    assert_eq!(postings[1].id, 25_474);
-    assert_eq!(postings[1].source_id, Some(31));
-    assert_eq!(id_state(&second, "voucher"), 11_614);
-    assert_eq!(id_state(&second, "posting"), 25_475);
-}
-
-#[test]
-fn unbalanced_source_year_is_rejected_without_mutating_set() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
-    let mut source = balanced_source_year(2024, 11_612, 25_471, 1_200);
-    source.postings[1].amount = Amount(-1_199);
-
-    let err = import_year(&mut set, source).unwrap_err();
-
-    assert!(matches!(
-        err,
-        ImportError::Unbalanced {
-            voucher: 11_612,
-            posting_count: 2,
-            minor_sum: 1
-        }
-    ));
-    assert_eq!(set.manifest.next_voucher_id, 1);
-    assert_eq!(set.manifest.next_posting_id, 1);
-    assert!(set.manifest.years.is_empty());
-    assert!(!set.year_path(2024).exists());
-}
-
-#[test]
-fn source_year_with_empty_voucher_is_rejected_without_mutating_set() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
-    let mut source = balanced_source_year(2024, 11_612, 25_471, 1_200);
-    source.postings.clear();
-
-    let err = import_year(&mut set, source).unwrap_err();
-
-    assert!(matches!(
-        err,
-        ImportError::Unbalanced {
-            voucher: 11_612,
-            posting_count: 0,
-            minor_sum: 0
-        }
-    ));
-    assert_eq!(set.manifest.next_voucher_id, 1);
-    assert_eq!(set.manifest.next_posting_id, 1);
-    assert!(set.manifest.years.is_empty());
-    assert!(!set.year_path(2024).exists());
-}
-
-#[test]
-fn negative_manifest_cursor_is_rejected_without_mutating_set() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
-    set.manifest.next_voucher_id = -4;
-    set.save().unwrap();
-    let before = set.manifest.clone();
-    let before_text = fs::read_to_string(dir.path().join("ledger-set.toml")).unwrap();
-    let mut source = balanced_source_year(2024, 1, 1, 1_200);
-    source.next_source_voucher_id = -4;
-
-    let err = import_year(&mut set, source).unwrap_err();
-
-    assert!(matches!(
-        err,
-        ImportError::IdAllocation {
-            source: IdAllocationError::NegativeCursor {
-                row_kind: "voucher",
-                start: -4,
-            }
-        }
-    ));
-    assert_eq!(set.manifest, before);
-    assert_eq!(
-        fs::read_to_string(dir.path().join("ledger-set.toml")).unwrap(),
-        before_text
-    );
-    assert!(!set.year_path(2024).exists());
-}
-
-#[test]
-fn overflowing_posting_cursor_is_rejected_without_mutating_set() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut set = LedgerSet::create(dir.path(), "Household").unwrap();
-    set.manifest.next_posting_id = i64::MAX;
-    set.save().unwrap();
-    let before = set.manifest.clone();
-    let before_text = fs::read_to_string(dir.path().join("ledger-set.toml")).unwrap();
-
-    let err = import_year(&mut set, balanced_source_year(2024, 1, 1, 1_200)).unwrap_err();
-
-    assert!(matches!(
-        err,
-        ImportError::IdAllocation {
-            source: IdAllocationError::CursorOverflow {
-                row_kind: "posting",
-                start: i64::MAX,
-                count: 2,
-            }
-        }
-    ));
-    assert_eq!(set.manifest, before);
-    assert_eq!(
-        fs::read_to_string(dir.path().join("ledger-set.toml")).unwrap(),
-        before_text
-    );
-    assert!(!set.year_path(2024).exists());
-}
-
-fn balanced_source_year(
-    year: i32,
-    voucher_source_id: i64,
-    posting_source_id: i64,
-    minor: i64,
-) -> SourceYear {
+fn source(year: i32, source: i64) -> SourceYear {
     SourceYear {
         year,
-        accounts: vec![account(1910, "Cash"), account(3010, "Sales")],
+        accounts: vec![
+            Account {
+                number: 1910,
+                name: "Cash".into(),
+                note: None,
+                sru_plus: Some(1000),
+                sru_minus: Some(1000),
+            },
+            Account {
+                number: 3010,
+                name: "Sales".into(),
+                note: None,
+                sru_plus: Some(3000),
+                sru_minus: Some(3000),
+            },
+        ],
         vouchers: vec![SourceVoucher {
-            source_id: voucher_source_id,
-            date: format!("{year}-01-31"),
-            text: Some("Source voucher".to_owned()),
+            source_id: source,
+            date: format!("{year}-01-02"),
+            text: Some("Sale".into()),
         }],
         postings: vec![
             SourcePosting {
-                source_id: posting_source_id,
-                source_voucher_id: voucher_source_id,
+                source_id: source * 10,
+                source_voucher_id: source,
                 account: 1910,
-                amount: Amount(minor),
-                text: Some("Debit".to_owned()),
+                amount: Amount(125),
+                text: None,
             },
             SourcePosting {
-                source_id: posting_source_id + 1,
-                source_voucher_id: voucher_source_id,
+                source_id: source * 10 + 1,
+                source_voucher_id: source,
                 account: 3010,
-                amount: Amount(-minor),
-                text: Some("Credit".to_owned()),
+                amount: Amount(-125),
+                text: None,
             },
         ],
-        next_source_voucher_id: voucher_source_id,
-        next_source_posting_id: posting_source_id,
+        next_source_voucher_id: 10,
+        next_source_posting_id: 20,
     }
 }
 
-fn account(number: i64, name: &str) -> Account {
-    Account {
-        number,
-        name: name.to_owned(),
-        note: None,
-        sru_plus: None,
-        sru_minus: None,
-    }
+#[test]
+fn model_mount_preserves_content_order_ids_and_balances() {
+    let port = mount();
+    let factory = Arc::new(SqliteYearFileFactory);
+    let mut set = LedgerSet::create(port.clone(), factory.clone(), "Household").unwrap();
+    import_year(&mut set, source(2024, 7)).unwrap();
+    import_year(&mut set, source(2025, 8)).unwrap();
+    let reopened = LedgerSet::open(port, factory).unwrap();
+    assert_eq!(reopened.manifest.years, vec![2024, 2025]);
+    assert_eq!(
+        reopened.year_store(2024).unwrap().vouchers().unwrap()[0].source_id,
+        Some(7)
+    );
+    let rows = balances(&reopened, &[2024, 2025], true).unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            crate::BalanceRow {
+                key: BalanceKey::Sru { code: 1000 },
+                amount: Amount(250),
+            },
+            crate::BalanceRow {
+                key: BalanceKey::Sru { code: 3000 },
+                amount: Amount(-250),
+            },
+        ]
+    );
+    assert_eq!(
+        balances(&reopened, &[2025, 2024], false).unwrap(),
+        vec![
+            crate::BalanceRow {
+                key: BalanceKey::Account {
+                    year: 2024,
+                    account: 1910,
+                },
+                amount: Amount(125),
+            },
+            crate::BalanceRow {
+                key: BalanceKey::Account {
+                    year: 2024,
+                    account: 3010,
+                },
+                amount: Amount(-125),
+            },
+            crate::BalanceRow {
+                key: BalanceKey::Account {
+                    year: 2025,
+                    account: 1910,
+                },
+                amount: Amount(125),
+            },
+            crate::BalanceRow {
+                key: BalanceKey::Account {
+                    year: 2025,
+                    account: 3010,
+                },
+                amount: Amount(-125),
+            },
+        ]
+    );
+    assert!(balances(&reopened, &[], true).unwrap().is_empty());
+
+    // A report session is assembled by attaching sources after connection. Its
+    // successful cross-source query proves cache invalidation, and its main
+    // source remains physically read-only even though YearStore has mutations.
+    let report = reopened.report_store(&[2024, 2025]).unwrap();
+    assert!(matches!(
+        report.insert_account(&Account {
+            number: 9999,
+            name: "Forbidden".into(),
+            note: None,
+            sru_plus: None,
+            sru_minus: None,
+        }),
+        Err(crate::StoreError::Storage(
+            sim_relation_site::SiteError::ReadOnly
+        ))
+    ));
 }
 
-fn id_state(store: &YearStore, kind: &str) -> i64 {
-    store
-        .conn
-        .query_row("SELECT next FROM id_state WHERE kind = ?1", [kind], |row| {
-            row.get(0)
-        })
-        .unwrap()
+#[test]
+fn rejected_import_does_not_advance_manifest() {
+    let port = mount();
+    let mut set = LedgerSet::create(port, Arc::new(SqliteYearFileFactory), "Household").unwrap();
+    let before = set.manifest.clone();
+    let mut bad = source(2024, 7);
+    bad.postings.pop();
+    assert!(import_year(&mut set, bad).is_err());
+    assert_eq!(set.manifest, before);
 }

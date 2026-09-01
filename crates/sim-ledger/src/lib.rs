@@ -12,8 +12,10 @@ pub mod codec;
 pub mod cookbook;
 pub mod import;
 pub mod model;
+pub mod reconciliation;
 pub mod report;
 pub mod set;
+pub mod statement;
 pub mod store;
 
 #[cfg(test)]
@@ -29,6 +31,18 @@ pub use model::{
     Account, Amount, BalanceError, Posting, Voucher, VoucherBalanceViolation, YearData,
     is_balanced, is_voucher_balanced, voucher_balance_violations,
 };
+pub use reconciliation::{
+    AcceptedDecision, Candidate, CandidateBounds, CandidateKind, CorrectionDraft,
+    DecisionDisposition, DecisionRecord, LedgerMovement, ReconciliationCertificate,
+    ReconciliationError, ReconciliationInputs, ReconciliationRef, ReconciliationReport,
+    build_certificate, generate_candidates, prepare_correction_draft, verify_certificate,
+};
 pub use report::{BalanceKey, BalanceRow, balances};
 pub use set::{IdAllocationError, LedgerSet, SetManifest};
-pub use store::YearStore;
+pub use sim_ledger_store_port::{RelationYearFile, StoreError, YearFileFactory};
+pub use statement::{
+    AmountLayout, CANONICAL_STATEMENT_ROW_VERSION, CanonicalStatementRow, DateFormat,
+    LedgerBalanceAtCutoff, RejectedStatementRow, STATEMENT_PROFILE_VERSION, StatementAdmission,
+    StatementError, StatementProfile, StatementSnapshot, admit_statement,
+};
+pub use store::{YearStore, ledger_schema, legacy_adoption_manifest};

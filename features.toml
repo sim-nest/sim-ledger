@@ -39,20 +39,14 @@ claims_surfaces = [
 [[feature]]
 id = "feature/sim-ledger/ledger-command"
 title = "Ledger command surface"
-summary = "Run ledger import, drafting, trial balance, and closing flows through the checked command package."
+summary = "Run ledger import, drafting, trial balance, and closing flows through the loadable command package with supplied mounts and platform time."
 owner = "crate/sim-ledger-cli"
 audiences = ["user", "code"]
-guidance = "Use this row when starting from the ledger command or tracing it back to the ledger crates."
+guidance = "Load sim-ledger-cli with an explicit CommandContext. Map opaque set/import names to preopened HostDirPort mounts and supply platform wall-clock data; never pass native paths, process environment, or temporary-directory discovery into ledger behavior."
 claims_anchors = [
-  "anchor/bin/ledger",
-  "anchor/cli/sim-ledger-cli",
   "anchor/crate/sim-ledger-cli",
   "anchor/rustdoc/sim-ledger-cli/crate-root",
   "anchor/rustdoc/sim-ledger-cli/run",
-]
-claims_surfaces = [
-  "cli/ledger",
-  "cli/sim-ledger-cli",
 ]
 claims_specimens = [
   "spec-test/sim-ledger/crates/sim-ledger-cli/src/tests",
@@ -64,12 +58,14 @@ supports = [
 [[feature]]
 id = "feature/sim-ledger/ledger-libraries"
 title = "Ledger libraries"
-summary = "Provide voucher storage, book construction, and closing libraries for ledger workflows."
+summary = "Provide mount-backed voucher storage, exact book construction, and closing libraries for ledger workflows."
 owner = "crate/sim-ledger"
 audiences = ["code", "framework"]
-guidance = "Use this row when tracing ledger command behavior to reusable ledger packages."
+guidance = "Compose LedgerSet over sim-storage-port mounts and an injected sim-ledger-store-port year-file factory. YearStore owns admitted relational schemas and checked plans behind narrow accounting methods, including left-joined trial balances and named read-only multi-year report sources; platform crates own provider placement and native adapters."
 claims_anchors = [
   "anchor/crate/sim-ledger",
+  "anchor/crate/sim-ledger-store-port",
+  "anchor/crate/sim-ledger-test-support",
   "anchor/crate/sim-ledger-odb",
   "anchor/crate/sim-lib-ledger-books",
   "anchor/crate/sim-lib-ledger-close",
@@ -79,10 +75,67 @@ claims_specimens = [
 ]
 
 [[route]]
+id = "route/admit-bank-statement"
+task = "Admit a bank statement for reconciliation"
+audiences = ["code", "framework"]
+steps = [
+  { feature = "feature/sim-ledger/statement-admission", why = "The ledger-owned profile contract turns declared delimited layouts into exact canonical rows." },
+  { specimen = "spec-test/sim-ledger/crates/sim-ledger/src/statement", why = "The checked specimen proves two synthetic layouts have identical canonical values and typed refusals stay outside the snapshot." },
+]
+
+[[feature]]
+id = "feature/sim-ledger/statement-admission"
+title = "Declarative bank statement admission"
+summary = "Admit delimited bank exports through versioned profile data into exact, cutoff-frozen reconciliation rows with source provenance and typed refusals."
+owner = "crate/sim-ledger"
+audiences = ["code", "framework"]
+guidance = "Construct StatementProfile data for each export layout and call admit_statement. Reuse Amount and ledger identities; add a new profile, never institution-specific Rust. Persist or review StatementAdmission only through a storage or office public contract."
+claims_anchors = [
+  "anchor/rustdoc/sim-ledger/statement",
+  "anchor/rustdoc/sim-ledger/statement/admit_statement",
+]
+claims_specimens = [
+  "spec-test/sim-ledger/crates/sim-ledger/src/statement",
+]
+supports = [
+  "feature/sim-ledger/ledger-libraries",
+]
+
+[[route]]
 id = "route/prepare-balanced-ledger"
 task = "Prepare a balanced ledger"
 audiences = ["user", "code"]
 steps = [
   { feature = "feature/sim-ledger/ledger-command", why = "The command row owns the operational entry point." },
   { specimen = "recipe/sim-ledger/crates/sim-ledger/01-basics/balanced-year", why = "The balanced-year recipe shows the expected yearly voucher shape." },
+]
+
+[[feature]]
+id = "feature/sim-ledger/exact-reconciliation"
+title = "Human-decided exact reconciliation"
+summary = "Enumerate bounded exact match candidates, preserve Mia's immutable set decisions, and issue independently recomputable close certificates."
+owner = "crate/sim-ledger"
+audiences = ["code", "framework"]
+guidance = "Freeze ReconciliationInputs, use generate_candidates only to order human review, journal Mia's DecisionRecord values, and call build_certificate plus verify_certificate. A close requires complete singular coverage and an exact zero bridge; correction output remains a balanced draft for separate human approval."
+claims_anchors = [
+  "anchor/rustdoc/sim-ledger/reconciliation",
+  "anchor/rustdoc/sim-ledger/reconciliation/generate_candidates",
+  "anchor/rustdoc/sim-ledger/reconciliation/verify_certificate",
+]
+claims_specimens = [
+  "spec-test/sim-ledger/crates/sim-ledger/src/reconciliation",
+]
+supports = [
+  "feature/sim-ledger/statement-admission",
+  "feature/sim-ledger/ledger-libraries",
+]
+
+[[route]]
+id = "route/verify-ledger-reconciliation"
+task = "Verify an exact ledger reconciliation certificate"
+audiences = ["code", "framework"]
+steps = [
+  { feature = "feature/sim-ledger/statement-admission", why = "Start from a cutoff-frozen canonical statement snapshot." },
+  { feature = "feature/sim-ledger/exact-reconciliation", why = "Reload the frozen inputs and immutable human decisions, then recompute coverage and bridge arithmetic independently." },
+  { specimen = "spec-test/sim-ledger/crates/sim-ledger/src/reconciliation", why = "Mutation and adversarial fixtures prove that altered evidence, duplicate coverage, overflow, and unresolved differences fail closed." },
 ]

@@ -10,8 +10,7 @@
         },
         {
           "edges": [
-            "dep:sim-codec",
-            "dep:sim-kernel"
+            "dep:sim-codec"
           ],
           "name": "sim",
           "workspace_edges": []
@@ -29,6 +28,16 @@
       "features": [],
       "group": "workspace",
       "package": "sim-ledger-odb"
+    },
+    {
+      "features": [],
+      "group": "workspace",
+      "package": "sim-ledger-store-port"
+    },
+    {
+      "features": [],
+      "group": "workspace",
+      "package": "sim-ledger-test-support"
     },
     {
       "features": [],

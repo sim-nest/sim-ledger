@@ -1,0 +1,21 @@
+[package]
+# orphan-crate-exempt: deterministic test-only model consumed exclusively through dev-dependencies
+name = "sim-ledger-test-support"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Deterministic model mounts for ledger conformance tests"
+readme = "README.md"
+
+[dependencies]
+sim-storage-port = { version = "0.1.0" }
+sim-ledger-store-port = { path = "../sim-ledger-store-port" }
+sim-kernel = { version = "0.3.0" }
+sim-platform-sqlite = { version = "0.1.0" }
+sim-relation-core = { version = "0.1.0" }
+sim-relation-site = { version = "0.1.0" }
+tempfile = "3"
+
+[lints]
+workspace = true

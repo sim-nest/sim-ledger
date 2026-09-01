@@ -20,7 +20,7 @@ pub struct CloseJournalEntry {
 
 /// Return the close state for one year.
 pub fn close_state(set: &LedgerSet, year: i32) -> Result<ClosingState, CloseError> {
-    let store = YearStore::open(&set.year_path(year))?;
+    let store = set.year_store(year)?;
     match store.meta_value(META_CLOSING_STATE)? {
         Some(value) => ClosingState::parse(&value),
         None => Ok(ClosingState::Open),
@@ -30,7 +30,7 @@ pub fn close_state(set: &LedgerSet, year: i32) -> Result<ClosingState, CloseErro
 /// Close one year and return exact statements for review/export.
 pub fn close_year(set: &mut LedgerSet, year: i32) -> Result<FinancialStatements, CloseError> {
     let statements = financial_statements(set, year)?;
-    let store = YearStore::open(&set.year_path(year))?;
+    let store = set.year_store(year)?;
     store.set_meta(META_CLOSING_STATE, ClosingState::Closed.as_str())?;
     append_journal(&store, ClosingState::Closed, "closed by close_year")?;
     Ok(statements)
@@ -48,7 +48,7 @@ pub fn reopen_year(
             "reopen reason must not be empty".to_owned(),
         ));
     }
-    let store = YearStore::open(&set.year_path(year))?;
+    let store = set.year_store(year)?;
     store.set_meta(META_CLOSING_STATE, ClosingState::Open.as_str())?;
     append_journal(&store, ClosingState::Open, reason)?;
     close_journal(set, year)
@@ -56,7 +56,7 @@ pub fn reopen_year(
 
 /// Read the close/reopen journal for one year.
 pub fn close_journal(set: &LedgerSet, year: i32) -> Result<Vec<CloseJournalEntry>, CloseError> {
-    let store = YearStore::open(&set.year_path(year))?;
+    let store = set.year_store(year)?;
     match store.meta_value(META_CLOSING_JOURNAL)? {
         Some(value) => parse_journal(&value),
         None => Ok(Vec::new()),

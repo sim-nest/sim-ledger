@@ -7,6 +7,8 @@
 | `sim-ledger` | `workspace` | Yearly ledger records and exact amount helpers. |
 | `sim-ledger-cli` | `workspace` | Command line runner for yearly ledger sets. |
 | `sim-ledger-odb` | `workspace` | LibreOffice Base import helpers for sim-ledger. |
+| `sim-ledger-store-port` | `workspace` | Provider-neutral relational year-file contract for ledger persistence. |
+| `sim-ledger-test-support` | `workspace` | Deterministic model mount used only by ledger conformance tests. |
 | `sim-lib-ledger-books` | `workspace` | Bookkeeping journal drafts and profile data for ledger sets. |
 | `sim-lib-ledger-close` | `workspace` | Fiscal-year close and financial statement helpers. |
 | `xtask` | `workspace` | SIM workspace package for xtask. |

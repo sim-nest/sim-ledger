@@ -18,15 +18,15 @@ This generated lane consumes `docs/generated/sim-index-fragment.sx`. Global inde
 | Feature | Subject | Specimens | Summary |
 | --- | --- | ---: | --- |
 | `feature/sim-ledger/generated-docs` | `crate/xtask` | 0 | Publish generated package, card, recipe, and index facts for the ledger crates. |
-| `feature/sim-ledger/ledger-command` | `crate/sim-ledger-cli` | 1 | Run ledger import, drafting, trial balance, and closing flows through the checked command package. |
-| `feature/sim-ledger/ledger-libraries` | `crate/sim-ledger` | 1 | Provide voucher storage, book construction, and closing libraries for ledger workflows. |
+| `feature/sim-ledger/ledger-command` | `crate/sim-ledger-cli` | 1 | Run ledger import, drafting, trial balance, and closing flows through the loadable command package with supplied mounts and platform time. |
+| `feature/sim-ledger/ledger-libraries` | `crate/sim-ledger` | 1 | Provide mount-backed voucher storage, exact book construction, and closing libraries for ledger workflows. |
+| `feature/sim-ledger/statement-admission` | `crate/sim-ledger` | 1 | Admit delimited bank exports through versioned profile data into exact, cutoff-frozen reconciliation rows with source provenance and typed refusals. |
+| `feature/sim-ledger/exact-reconciliation` | `crate/sim-ledger` | 1 | Enumerate bounded exact match candidates, preserve Mia's immutable set decisions, and issue independently recomputable close certificates. |
 
 ## Surfaces
 
 | Surface | Kind | Subject |
 | --- | --- | --- |
-| `cli/ledger` | `cli` | `crate/sim-ledger-cli` |
-| `cli/sim-ledger-cli` | `cli` | `crate/sim-ledger-cli` |
 | `cli/xtask` | `cli` | `crate/xtask` |
 | `docs/sim-ledger/generated` | `docs` | `doc-set/sim-ledger/generated` |
 
@@ -36,6 +36,9 @@ This generated lane consumes `docs/generated/sim-index-fragment.sx`. Global inde
 - `crates/sim-ledger/recipes/01-basics/balanced-year/recipe.toml`
 - `crates/sim-ledger/recipes/01-basics/balanced-year/setup.siml`
 - `crates/sim-ledger/recipes/01-basics/chapter.toml`
+- `crates/sim-ledger/recipes/01-basics/exact-reconciliation/purpose.md`
+- `crates/sim-ledger/recipes/01-basics/exact-reconciliation/recipe.toml`
+- `crates/sim-ledger/recipes/01-basics/exact-reconciliation/setup.siml`
 - `crates/sim-ledger/recipes/book.toml`
 
 ## Worked Examples
@@ -47,480 +50,50 @@ Specimen `spec-test/sim-ledger/crates/sim-ledger-cli/src/tests` is checked by `c
 Source `crates/sim-ledger-cli/src/tests.rs`:
 
 ```rust
-use std::fs::{self, File};
-use std::io::Write;
-use std::path::Path;
+// conformance: ledger commands operate only through supplied mounts and clock context.
 
-use sim_ledger::{Account, Amount, LedgerSet, Posting, Voucher, YearStore};
-use sim_ledger_odb::{Cell, ColType, try_write_cell};
-use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, ZipWriter};
+use crate::{CommandContext, run};
+use sim_ledger_test_support::{ModelMount, SqliteYearFileFactory};
+use std::{collections::BTreeMap, sync::Arc};
 
-use super::run;
-
-// conformance: ledger command surface imports, reports, drafts, and closes books.
-
-#[test]
-fn csv_loop_imports_years_and_reports() {
-    let temp = tempfile::tempdir().unwrap();
-    let set_dir = temp.path().join("books");
-    let csv_dir = temp.path().join("csv");
-    fs::create_dir(&csv_dir).unwrap();
-    write_csv_export(&csv_dir, TRANS_BALANCED);
-
-    let (code, out, err) = run_command(["new", path(&set_dir), "--label", "Personal"]);
-    assert_eq!(code, 0, "{err}");
-    assert!(out.starts_with("created "));
-    assert!(out.contains("(next voucher id 1, next posting id 1)\n"));
-
-    let (code, out, err) = run_command([
-        "import",
-        path(&set_dir),
-        "--csv",
-        path(&csv_dir),
-        "--year",
-        "2024",
-    ]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(
-        out,
-        "imported 2024: 2 accounts, 1 vouchers, 2 postings\n  canonical voucher ids 11612..11613, posting ids 25471..25473\n"
-    );
-
-    let (code, out, err) = run_command(["years", path(&set_dir)]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(out, "2024\n");
-
-    let (code, out, err) = run_command(["report", path(&set_dir), "--year", "2024", "--by", "sru"]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(out, "SRU BALANCE\n1000 12.00\n3000 -12.00\n");
+fn context() -> CommandContext {
+    let mount: Arc<dyn sim_storage_port::HostDirPort> = Arc::new(ModelMount::new("cli-model"));
+    CommandContext {
+        ledger_sets: BTreeMap::from([("books".into(), mount)]),
+        imports: BTreeMap::new(),
+        year_files: Arc::new(SqliteYearFileFactory),
+        wall_clock_ns: 1_767_225_600_000_000_000,
+    }
 }
-
 #[test]
-fn close_statements_and_sru_compare_are_reachable_from_cli() {
-    let temp = tempfile::tempdir().unwrap();
-    let set_dir = temp.path().join("books");
-    let csv_dir = temp.path().join("csv");
-    fs::create_dir(&csv_dir).unwrap();
-    write_csv_export(&csv_dir, TRANS_BALANCED);
-
-    let (code, _, err) = run_command(["new", path(&set_dir), "--label", "Personal"]);
-    assert_eq!(code, 0, "{err}");
-    let (code, _, err) = run_command([
-        "import",
-        path(&set_dir),
-        "--csv",
-        path(&csv_dir),
-        "--year",
-        "2024",
-    ]);
-    assert_eq!(code, 0, "{err}");
-
-    let (code, out, err) = run_command(["statements", path(&set_dir), "--year", "2024"]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(out, expected_statements());
-
-    let (code, out, err) = run_command(["sru-compare", path(&set_dir), "--years", "2024"]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(out, "SRU 2024\n1000 12.00\n3000 -12.00\n");
-
-    let (code, out, err) = run_command(["close", path(&set_dir), "--year", "2024"]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(out, format!("closed 2024\n{}", expected_statements()));
-    assert!(
-        YearStore::open(&LedgerSet::open(&set_dir).unwrap().year_path(2024))
-            .unwrap()
-            .is_closed()
-            .unwrap()
-    );
-}
-
-#[test]
-fn close_and_statements_reject_unbalanced_vouchers() {
-    let temp = tempfile::tempdir().unwrap();
-    let set_dir = temp.path().join("books");
-    write_unbalanced_set(&set_dir);
-
-    let (code, _, err) = run_command(["statements", path(&set_dir), "--year", "2024"]);
-    assert_eq!(code, 1);
-    assert!(err.contains("voucher 1 has 2 postings"), "{err}");
-    assert!(err.contains("unbalanced by 1 minor units"), "{err}");
-
-    let (code, _, err) = run_command(["close", path(&set_dir), "--year", "2024"]);
-    assert_eq!(code, 1);
-    assert!(err.contains("voucher 1 has 2 postings"), "{err}");
-    assert!(err.contains("unbalanced by 1 minor units"), "{err}");
-}
-
-#[test]
-fn draft_check_uses_books_validator() {
-    let (code, out, err) = run_command([
-        "draft-check",
-        "--date",
-        "2024-01-31",
-        "--text",
-        "Receipt",
-        "--posting",
-        "1910:12.00",
-        "--posting",
-        "3010:-12.00",
-    ]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(out, "journal draft 2024-01-31 is balanced: 2 postings\n");
-
-    let (code, _, err) = run_command([
-        "draft-check",
-        "--date",
-        "2024-01-31",
-        "--text",
-        "Receipt",
-        "--posting",
-        "1910:12.00",
-        "--posting",
-        "3010:-11.99",
-    ]);
-    assert_eq!(code, 1);
-    assert!(
-        err.contains("journal draft is unbalanced by 1 minor units"),
-        "{err}"
-    );
-}
-
-#[test]
-fn odb_import_uses_explicit_year_without_filename_digits() {
-    let temp = tempfile::tempdir().unwrap();
-    let set_dir = temp.path().join("books");
-    let odb_path = temp.path().join("books.odb");
-    write_odb_export(&odb_path);
-
-    let (code, out, err) = run_command(["new", path(&set_dir), "--label", "Personal"]);
-    assert_eq!(code, 0, "{err}");
-    assert!(out.starts_with("created "));
-
-    let (code, out, err) = run_command([
-        "import",
-        path(&set_dir),
-        "--odb",
-        path(&odb_path),
-        "--year",
-        "2024",
-    ]);
-
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(
-        out,
-        "imported 2024: 2 accounts, 1 vouchers, 2 postings\n  canonical voucher ids 11612..11613, posting ids 25471..25473\n"
-    );
-
-    let (code, out, err) = run_command(["years", path(&set_dir)]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(out, "2024\n");
-}
-
-#[test]
-fn unbalanced_import_names_the_rejected_voucher() {
-    let temp = tempfile::tempdir().unwrap();
-    let set_dir = temp.path().join("books");
-    let csv_dir = temp.path().join("csv");
-    fs::create_dir(&csv_dir).unwrap();
-    write_csv_export(&csv_dir, TRANS_UNBALANCED);
-
-    let (code, _, err) = run_command(["new", path(&set_dir), "--label", "Personal"]);
-    assert_eq!(code, 0, "{err}");
-
-    let (code, _, err) = run_command([
-        "import",
-        path(&set_dir),
-        "--csv",
-        path(&csv_dir),
-        "--year",
-        "2024",
-    ]);
-    assert_eq!(code, 1);
-    assert!(err.contains("voucher 11612"), "{err}");
-    assert!(err.contains("unbalanced"), "{err}");
-}
-
-#[test]
-fn overflowing_import_cursor_reports_error_without_rewriting_manifest() {
-    let temp = tempfile::tempdir().unwrap();
-    let set_dir = temp.path().join("books");
-    let csv_dir = temp.path().join("csv");
-    fs::create_dir(&csv_dir).unwrap();
-    write_csv_export(&csv_dir, TRANS_BALANCED);
-
-    let (code, _, err) = run_command(["new", path(&set_dir), "--label", "Personal"]);
-    assert_eq!(code, 0, "{err}");
-    let manifest = format!(
-        "label = \"Personal\"\nnext_voucher_id = {}\nnext_posting_id = 1\nyears = []\n",
-        i64::MAX
-    );
-    fs::write(set_dir.join("ledger-set.toml"), &manifest).unwrap();
-
-    let (code, _, err) = run_command([
-        "import",
-        path(&set_dir),
-        "--csv",
-        path(&csv_dir),
-        "--year",
-        "2024",
-    ]);
-
-    assert_eq!(code, 1);
-    assert!(
-        err.contains("voucher id range starting at 9223372036854775807"),
-        "{err}"
-    );
-    assert!(err.contains("overflows i64"), "{err}");
-    assert_eq!(
-        fs::read_to_string(set_dir.join("ledger-set.toml")).unwrap(),
-        manifest
-    );
-}
-
-fn run_command<const N: usize>(args: [&str; N]) -> (i32, String, String) {
+fn loadable_command_uses_named_model_mount() {
+    let context = context();
     let mut out = Vec::new();
     let mut err = Vec::new();
-    let code = run(args, &mut out, &mut err);
-    (
-        code,
-        String::from_utf8(out).unwrap(),
-        String::from_utf8(err).unwrap(),
-    )
-}
-
-fn path(path: &Path) -> &str {
-    path.to_str().unwrap()
-}
-
-fn expected_statements() -> &'static str {
-    "\
-YEAR 2024
-TRIAL BALANCE
-ACCOUNT OPENING DEBIT CREDIT CLOSING SRU
-1910 0.00 12.00 0.00 12.00 1000
-3010 0.00 0.00 12.00 -12.00 3000
-INCOME STATEMENT
-SRU 3000 -12.00
-TOTAL -12.00
-BALANCE SHEET
-SRU 1000 12.00
-TOTAL 12.00
-NOTES
-basis Amounts are signed exact minor units from the ledger year.
-"
-}
-
-fn write_unbalanced_set(set_dir: &Path) {
-    let mut set = LedgerSet::create(set_dir, "Personal").unwrap();
-    let store = YearStore::create(&set.year_path(2024), 2024).unwrap();
-    store
-        .insert_account(&account(1910, "Cash", Some(1000), None))
-        .unwrap();
-    store
-        .insert_account(&account(3010, "Sales", None, Some(3000)))
-        .unwrap();
-    store
-        .insert_voucher(&Voucher {
-            id: 1,
-            source_id: Some(11612),
-            date: "2024-01-31".to_owned(),
-            text: Some("Receipt".to_owned()),
-        })
-        .unwrap();
-    store
-        .insert_posting(&posting(1, 1910, Amount(1_200), "Debit"))
-        .unwrap();
-    store
-        .insert_posting(&posting(2, 3010, Amount(-1_199), "Credit"))
-        .unwrap();
-    store.set_id_state("voucher", 2).unwrap();
-    store.set_id_state("posting", 3).unwrap();
-    set.manifest.years.push(2024);
-    set.save().unwrap();
-}
-
-fn account(number: i64, name: &str, sru_plus: Option<i32>, sru_minus: Option<i32>) -> Account {
-    Account {
-        number,
-        name: name.to_owned(),
-        note: None,
-        sru_plus,
-        sru_minus,
-    }
-}
-
-fn posting(id: i64, account: i64, amount: Amount, text: &str) -> Posting {
-    Posting {
-        id,
-        source_id: Some(id + 25_470),
-        voucher_id: 1,
-        account,
-        amount,
-        text: Some(text.to_owned()),
-    }
-}
-
-fn write_csv_export(dir: &Path, trans: &str) {
-    fs::write(
-        dir.join("script"),
-        r#"
-CREATE CACHED TABLE "konto"("k_nr" INTEGER NOT NULL PRIMARY KEY,"k_namn" VARCHAR(50),"k_text" VARCHAR(200),"k_sru_p" INTEGER,"k_sru_m" INTEGER)
-CREATE CACHED TABLE "ver"("v_nr" INTEGER NOT NULL PRIMARY KEY,"v_datum" DATE NOT NULL,"v_text" VARCHAR(200))
-CREATE CACHED TABLE "trans"("t_nr" INTEGER NOT NULL PRIMARY KEY,"t_ver" INTEGER NOT NULL,"t_konto" INTEGER NOT NULL,"t_belopp" NUMERIC(50,2) NOT NULL,"t_text" VARCHAR(200))
-ALTER TABLE "ver" ALTER COLUMN "v_nr" RESTART WITH 11612
-ALTER TABLE "trans" ALTER COLUMN "t_nr" RESTART WITH 25471
-"#,
-    )
-    .unwrap();
-    fs::write(
-        dir.join("konto.csv"),
-        "k_nr,k_namn,k_text,k_sru_p,k_sru_m\n1910,Cash,,1000,\n3010,Sales,,,3000\n",
-    )
-    .unwrap();
-    fs::write(
-        dir.join("ver.csv"),
-        "v_nr,v_datum,v_text\n11612,2024-01-31,Receipt\n",
-    )
-    .unwrap();
-    fs::write(dir.join("trans.csv"), trans).unwrap();
-}
-
-fn write_odb_export(path: &Path) {
-    let (data, roots) = synthetic_odb_data();
-    let script = odb_script_text(roots);
-    let file = File::create(path).unwrap();
-    let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-    zip.start_file("database/script", options).unwrap();
-    zip.write_all(script.as_bytes()).unwrap();
-    zip.start_file("database/data", options).unwrap();
-    zip.write_all(&data).unwrap();
-    zip.start_file("database/properties", options).unwrap();
-    zip.write_all(b"hsqldb.cache_file_scale=1\n").unwrap();
-    zip.finish().unwrap();
-}
-
-fn synthetic_odb_data() -> (Vec<u8>, OdbRoots) {
-    let mut data = vec![0; 16];
-    let account_cash = append_odb_row(
-        &mut data,
-        0,
-        0,
-        &[
-            (Cell::Int(1910), ColType::Integer),
-            (Cell::Str("Cash".to_owned()), ColType::Varchar),
-            (Cell::Null, ColType::Varchar),
-            (Cell::Int(1000), ColType::Integer),
-            (Cell::Null, ColType::Integer),
-        ],
+    assert_eq!(
+        run(
+            &context,
+            ["new", "books", "--label", "Household"],
+            &mut out,
+            &mut err
+        ),
+        0
     );
-    let account_sales = append_odb_row(
-        &mut data,
-        account_cash,
-        0,
-        &[
-            (Cell::Int(3010), ColType::Integer),
-            (Cell::Str("Sales".to_owned()), ColType::Varchar),
-            (Cell::Null, ColType::Varchar),
-            (Cell::Null, ColType::Integer),
-            (Cell::Int(3000), ColType::Integer),
-        ],
-    );
-    let voucher = append_odb_row(
-        &mut data,
-        0,
-        0,
-        &[
-            (Cell::Int(11_612), ColType::Integer),
-            (Cell::Date("2024-01-31".to_owned()), ColType::Date),
-            (Cell::Str("Receipt".to_owned()), ColType::Varchar),
-        ],
-    );
-    let posting_debit = append_odb_row(
-        &mut data,
-        0,
-        0,
-        &[
-            (Cell::Int(25_471), ColType::Integer),
-            (Cell::Int(11_612), ColType::Integer),
-            (Cell::Int(1910), ColType::Integer),
-            (Cell::Num(1_200), ColType::Numeric),
-            (Cell::Str("Debit".to_owned()), ColType::Varchar),
-        ],
-    );
-    let posting_credit = append_odb_row(
-        &mut data,
-        posting_debit,
-        0,
-        &[
-            (Cell::Int(25_472), ColType::Integer),
-            (Cell::Int(11_612), ColType::Integer),
-            (Cell::Int(3010), ColType::Integer),
-            (Cell::Num(-1_200), ColType::Numeric),
-            (Cell::Str("Credit".to_owned()), ColType::Varchar),
-        ],
-    );
-    (
-        data,
-        OdbRoots {
-            konto: account_sales,
-            ver: voucher,
-            trans: posting_credit,
-        },
-    )
+    out.clear();
+    assert_eq!(run(&context, ["years", "books"], &mut out, &mut err), 0);
+    assert!(out.is_empty());
+    assert!(err.is_empty());
 }
-
-fn append_odb_row(data: &mut Vec<u8>, left: i32, right: i32, cells: &[(Cell, ColType)]) -> i32 {
-    let offset = i32::try_from(data.len()).unwrap();
-    let mut body = Vec::new();
-    body.extend_from_slice(&0_i32.to_be_bytes());
-    body.extend_from_slice(&left.to_be_bytes());
-    body.extend_from_slice(&right.to_be_bytes());
-    body.extend_from_slice(&0_i32.to_be_bytes());
-    for (cell, ty) in cells {
-        try_write_cell(&mut body, cell, *ty).unwrap();
-    }
-    let row_size = i32::try_from(body.len() + 4).unwrap();
-    data.extend_from_slice(&row_size.to_be_bytes());
-    data.extend_from_slice(&body);
-    offset
+#[test]
+fn absent_mount_fails_without_echoing_a_host_path() {
+    let context = context();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    assert_eq!(run(&context, ["years", "missing"], &mut out, &mut err), 1);
+    let text = String::from_utf8(err).unwrap();
+    assert!(text.contains("mount missing is not supplied"));
+    assert!(!text.contains('/'));
 }
-
-#[derive(Clone, Copy)]
-struct OdbRoots {
-    konto: i32,
-    ver: i32,
-    trans: i32,
-}
-
-fn odb_script_text(roots: OdbRoots) -> String {
-    format!(
-        r#"
-CREATE CACHED TABLE "konto"("k_nr" INTEGER NOT NULL PRIMARY KEY,"k_namn" VARCHAR(50),"k_text" VARCHAR(200),"k_sru_p" INTEGER,"k_sru_m" INTEGER)
-CREATE CACHED TABLE "ver"("v_nr" INTEGER NOT NULL PRIMARY KEY,"v_datum" DATE NOT NULL,"v_text" VARCHAR(200))
-CREATE CACHED TABLE "trans"("t_nr" INTEGER NOT NULL PRIMARY KEY,"t_ver" INTEGER NOT NULL,"t_konto" INTEGER NOT NULL,"t_belopp" NUMERIC(50,2) NOT NULL,"t_text" VARCHAR(200))
-ALTER TABLE "ver" ALTER COLUMN "v_nr" RESTART WITH 11612
-ALTER TABLE "trans" ALTER COLUMN "t_nr" RESTART WITH 25471
-SET TABLE "konto" INDEX'{} 0'
-SET TABLE "ver" INDEX'{} 11612'
-SET TABLE "trans" INDEX'{} 25471'
-"#,
-        roots.konto, roots.ver, roots.trans
-    )
-}
-
-const TRANS_BALANCED: &str = "\
-t_nr,t_ver,t_konto,t_belopp,t_text
-25471,11612,1910,12.00,Debit
-25472,11612,3010,-12.00,Credit
-";
-
-const TRANS_UNBALANCED: &str = "\
-t_nr,t_ver,t_konto,t_belopp,t_text
-25471,11612,1910,12.00,Debit
-25472,11612,3010,-11.99,Credit
-";
 ```
 
 ### `feature/sim-ledger/ledger-libraries`
@@ -738,6 +311,1575 @@ mod tests {
             amount: Amount(amount),
             text: None,
         }
+    }
+}
+```
+
+### `feature/sim-ledger/statement-admission`
+
+Specimen `spec-test/sim-ledger/crates/sim-ledger/src/statement` is checked by `cargo test`.
+
+Source `crates/sim-ledger/src/statement.rs`:
+
+```rust
+//! Declarative admission of bank statement rows into reconciliation snapshots.
+//!
+//! A [`StatementProfile`] is data: adding an institution or export layout does
+//! not add a parser implementation. Admission is fail-closed per row and the
+//! returned snapshot contains accepted rows only.
+
+// conformance: statement profiles canonicalize equivalent layouts and reject bad rows.
+
+use std::collections::BTreeSet;
+use std::fmt;
+
+use crate::Amount;
+
+/// Current serialized statement-profile contract version.
+pub const STATEMENT_PROFILE_VERSION: u16 = 1;
+
+/// Current serialized canonical-row contract version.
+///
+/// Readers must refuse unknown versions and migrate older persisted rows
+/// explicitly; admission never guesses at a historical representation.
+pub const CANONICAL_STATEMENT_ROW_VERSION: u16 = 1;
+
+/// Supported date renderings in statement data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub enum DateFormat {
+    /// `YYYY-MM-DD`.
+    Iso8601,
+    /// `DD/MM/YYYY`.
+    DayMonthYearSlash,
+}
+
+/// Declarative placement and sign convention for an amount.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub enum AmountLayout {
+    /// One signed column. A leading minus is allowed; plus and parentheses are refused.
+    Signed {
+        /// Zero-based column index.
+        column: usize,
+    },
+    /// Separate unsigned debit and credit columns; exactly one must be populated.
+    DebitCredit {
+        /// Debit column, admitted as a negative amount.
+        debit_column: usize,
+        /// Credit column, admitted as a positive amount.
+        credit_column: usize,
+    },
+}
+
+/// Versioned, serializable statement layout. Institution-specific behavior belongs here.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StatementProfile {
+    /// Contract version. Only [`STATEMENT_PROFILE_VERSION`] is admitted.
+    pub version: u16,
+    /// Stable profile identity recorded on every canonical row.
+    pub id: String,
+    /// One-byte field delimiter.
+    pub delimiter: u8,
+    /// Whether the first non-empty record is a header.
+    pub has_header: bool,
+    /// Date column.
+    pub date_column: usize,
+    /// Accepted date rendering.
+    pub date_format: DateFormat,
+    /// Amount columns and sign rule.
+    pub amount: AmountLayout,
+    /// Decimal separator declared by this source.
+    pub decimal_separator: u8,
+    /// Exact fractional precision declared by this source (zero through two).
+    pub fractional_digits: u8,
+    /// The sole currency admitted from this source.
+    pub currency: String,
+    /// Optional currency column. When present every row must equal `currency`.
+    pub currency_column: Option<usize>,
+    /// Source-row identity column, used to reject duplicates.
+    pub identity_column: usize,
+    /// Optional description column.
+    pub description_column: Option<usize>,
+}
+
+/// One exact ledger balance frozen alongside a statement.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct LedgerBalanceAtCutoff {
+    /// Ledger account identity.
+    pub account: String,
+    /// Exact balance at the cutoff.
+    pub amount: Amount,
+}
+
+/// Canonical admitted statement value with complete source provenance.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct CanonicalStatementRow {
+    /// Serialized row contract version.
+    pub version: u16,
+    /// Canonical ISO-8601 date.
+    pub date: String,
+    /// Exact signed minor-unit amount.
+    pub amount: Amount,
+    /// Declared ISO-style currency code.
+    pub currency: String,
+    /// Optional source description.
+    pub description: Option<String>,
+    /// Identity of this row in the source export.
+    pub source_identity: String,
+    /// Opaque source/export reference.
+    pub source_ref: String,
+    /// One-based physical record ordinal.
+    pub ordinal: usize,
+    /// Profile identity used for admission.
+    pub profile_id: String,
+    /// Original record bytes, excluding the line terminator.
+    pub original_bytes: Vec<u8>,
+}
+
+/// A rejected source record and its typed refusal.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct RejectedStatementRow {
+    /// One-based physical record ordinal.
+    pub ordinal: usize,
+    /// Original record bytes, excluding the line terminator.
+    pub original_bytes: Vec<u8>,
+    /// Exact refusal reason.
+    pub reason: StatementError,
+}
+
+/// Immutable reconciliation inputs at an explicit cutoff.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StatementSnapshot {
+    /// Caller-defined cutoff, conventionally an ISO-8601 instant or date.
+    pub cutoff: String,
+    /// Opaque source/export reference.
+    pub source_ref: String,
+    /// Profile identity.
+    pub profile_id: String,
+    /// Canonical rows accepted before the cutoff.
+    pub rows: Vec<CanonicalStatementRow>,
+    /// Checked sum of all accepted rows.
+    pub total: Amount,
+    /// Ledger balances frozen at the same cutoff.
+    pub ledger_balances: Vec<LedgerBalanceAtCutoff>,
+}
+
+/// Complete admission outcome. Rejections never enter [`StatementSnapshot::rows`].
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StatementAdmission {
+    /// Atomic snapshot of accepted values and ledger comparison inputs.
+    pub snapshot: StatementSnapshot,
+    /// Refused rows retained for review.
+    pub rejected: Vec<RejectedStatementRow>,
+}
+
+/// Typed profile or row refusal.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub enum StatementError {
+    /// The profile requires an explicit migration before it can be used.
+    UnsupportedProfileVersion {
+        /// Profile version observed in the input declaration.
+        found: u16,
+        /// Newest profile version supported by this implementation.
+        supported: u16,
+    },
+    /// A profile declaration is invalid.
+    InvalidProfile(String),
+    /// Input was not UTF-8.
+    InvalidEncoding,
+    /// A row did not contain every declared column.
+    MissingColumn {
+        /// Zero-based index of the first absent declared column.
+        column: usize,
+    },
+    /// A required date was empty or invalid.
+    MissingOrInvalidDate,
+    /// A source identity was empty.
+    MissingSourceIdentity,
+    /// A source identity occurred more than once.
+    DuplicateSourceIdentity(String),
+    /// The row's currency differs from the profile's one declared currency.
+    MixedCurrency {
+        /// Currency fixed by the active statement profile.
+        expected: String,
+        /// Conflicting currency observed in the row.
+        found: String,
+    },
+    /// The amount used more precision than declared or supported.
+    ExcessPrecision,
+    /// The amount sign could not be interpreted unambiguously.
+    AmbiguousSign,
+    /// The amount was otherwise malformed.
+    MalformedAmount,
+    /// Exact minor-unit conversion or snapshot addition overflowed.
+    ArithmeticOverflow,
+    /// A delimited row was malformed.
+    MalformedRow,
+}
+
+impl fmt::Display for StatementError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for StatementError {}
+
+/// Admit delimited statement bytes through profile data and freeze ledger inputs.
+///
+/// Profile-level errors refuse the operation. Row-level errors are returned in
+/// [`StatementAdmission::rejected`] and cannot affect the accepted snapshot.
+pub fn admit_statement(
+    profile: &StatementProfile,
+    source_ref: &str,
+    cutoff: &str,
+    input: &[u8],
+    ledger_balances: Vec<LedgerBalanceAtCutoff>,
+) -> Result<StatementAdmission, StatementError> {
+    validate_profile(profile)?;
+    if source_ref.is_empty() || cutoff.is_empty() {
+        return Err(StatementError::InvalidProfile(
+            "source_ref and cutoff must be non-empty".to_owned(),
+        ));
+    }
+    let text = std::str::from_utf8(input).map_err(|_| StatementError::InvalidEncoding)?;
+    let mut rows = Vec::new();
+    let mut rejected = Vec::new();
+    let mut identities = BTreeSet::new();
+    let mut total = 0_i64;
+
+    let mut header_pending = profile.has_header;
+    for (line_index, raw_line) in text.lines().enumerate() {
+        let ordinal = line_index + 1;
+        let raw = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        if raw.is_empty() {
+            continue;
+        }
+        if header_pending {
+            header_pending = false;
+            continue;
+        }
+        let original_bytes = raw.as_bytes().to_vec();
+        match parse_row(profile, source_ref, ordinal, raw, &mut identities) {
+            Ok(row) => match total.checked_add(row.amount.0) {
+                Some(next) => {
+                    total = next;
+                    rows.push(row);
+                }
+                None => rejected.push(RejectedStatementRow {
+                    ordinal,
+                    original_bytes,
+                    reason: StatementError::ArithmeticOverflow,
+                }),
+            },
+            Err(reason) => rejected.push(RejectedStatementRow {
+                ordinal,
+                original_bytes,
+                reason,
+            }),
+        }
+    }
+
+    Ok(StatementAdmission {
+        snapshot: StatementSnapshot {
+            cutoff: cutoff.to_owned(),
+            source_ref: source_ref.to_owned(),
+            profile_id: profile.id.clone(),
+            rows,
+            total: Amount(total),
+            ledger_balances,
+        },
+        rejected,
+    })
+}
+
+fn validate_profile(profile: &StatementProfile) -> Result<(), StatementError> {
+    if profile.version != STATEMENT_PROFILE_VERSION {
+        return Err(StatementError::UnsupportedProfileVersion {
+            found: profile.version,
+            supported: STATEMENT_PROFILE_VERSION,
+        });
+    }
+    if profile.id.is_empty() || profile.currency.is_empty() {
+        return Err(StatementError::InvalidProfile(
+            "profile id and currency must be non-empty".to_owned(),
+        ));
+    }
+    if matches!(profile.delimiter, b'\n' | b'\r' | b'"') || !profile.delimiter.is_ascii() {
+        return Err(StatementError::InvalidProfile(
+            "delimiter must be a safe single ASCII byte".to_owned(),
+        ));
+    }
+    if !matches!(profile.decimal_separator, b'.' | b',') || profile.fractional_digits > 2 {
+        return Err(StatementError::InvalidProfile(
+            "decimal rule must declare separator and zero through two digits".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn parse_row(
+    profile: &StatementProfile,
+    source_ref: &str,
+    ordinal: usize,
+    raw: &str,
+    identities: &mut BTreeSet<String>,
+) -> Result<CanonicalStatementRow, StatementError> {
+    let fields = split_fields(raw, profile.delimiter as char)?;
+    let field = |column: usize| {
+        fields
+            .get(column)
+            .map(|value| value.trim())
+            .ok_or(StatementError::MissingColumn { column })
+    };
+    let source_identity = field(profile.identity_column)?.to_owned();
+    if source_identity.is_empty() {
+        return Err(StatementError::MissingSourceIdentity);
+    }
+    if identities.contains(&source_identity) {
+        return Err(StatementError::DuplicateSourceIdentity(source_identity));
+    }
+    let date = canonical_date(field(profile.date_column)?, profile.date_format)?;
+    if let Some(column) = profile.currency_column {
+        let found = field(column)?;
+        if found != profile.currency {
+            return Err(StatementError::MixedCurrency {
+                expected: profile.currency.clone(),
+                found: found.to_owned(),
+            });
+        }
+    }
+    let amount = match profile.amount {
+        AmountLayout::Signed { column } => parse_amount(field(column)?, profile, false)?,
+        AmountLayout::DebitCredit {
+            debit_column,
+            credit_column,
+        } => {
+            let debit = field(debit_column)?;
+            let credit = field(credit_column)?;
+            match (debit.is_empty(), credit.is_empty()) {
+                (false, true) => parse_amount(debit, profile, true)?,
+                (true, false) => parse_amount(credit, profile, false)?,
+                _ => return Err(StatementError::AmbiguousSign),
+            }
+        }
+    };
+    let row = CanonicalStatementRow {
+        version: CANONICAL_STATEMENT_ROW_VERSION,
+        date,
+        amount,
+        currency: profile.currency.clone(),
+        description: profile
+            .description_column
+            .map(field)
+            .transpose()?
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        source_identity,
+        source_ref: source_ref.to_owned(),
+        ordinal,
+        profile_id: profile.id.clone(),
+        original_bytes: raw.as_bytes().to_vec(),
+    };
+    identities.insert(row.source_identity.clone());
+    Ok(row)
+}
+
+fn split_fields(line: &str, delimiter: char) -> Result<Vec<String>, StatementError> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.chars().peekable();
+    let mut quoted = false;
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                current.push('"');
+                chars.next();
+            }
+            '"' => quoted = !quoted,
+            value if value == delimiter && !quoted => {
+                fields.push(std::mem::take(&mut current));
+            }
+            value => current.push(value),
+        }
+    }
+    if quoted {
+        return Err(StatementError::MalformedRow);
+    }
+    fields.push(current);
+    Ok(fields)
+}
+
+fn parse_amount(
+    text: &str,
+    profile: &StatementProfile,
+    negate: bool,
+) -> Result<Amount, StatementError> {
+    if text.is_empty() || text.starts_with('+') || text.contains(['(', ')']) {
+        return Err(StatementError::AmbiguousSign);
+    }
+    if negate && text.starts_with('-') {
+        return Err(StatementError::AmbiguousSign);
+    }
+    let separator = profile.decimal_separator as char;
+    let (negative, unsigned) = text
+        .strip_prefix('-')
+        .map_or((false, text), |rest| (true, rest));
+    let mut parts = unsigned.split(separator);
+    let whole = parts.next().unwrap_or_default();
+    let fraction = parts.next();
+    if parts.next().is_some() || whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(StatementError::MalformedAmount);
+    }
+    let fraction = fraction.unwrap_or("");
+    if fraction.len() > profile.fractional_digits as usize {
+        return Err(StatementError::ExcessPrecision);
+    }
+    if !fraction.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(StatementError::MalformedAmount);
+    }
+    let scale = 10_i64
+        .checked_pow(u32::from(profile.fractional_digits))
+        .ok_or(StatementError::ArithmeticOverflow)?;
+    let whole = whole
+        .parse::<i64>()
+        .map_err(|_| StatementError::ArithmeticOverflow)?;
+    let mut value = whole
+        .checked_mul(scale)
+        .ok_or(StatementError::ArithmeticOverflow)?;
+    if !fraction.is_empty() {
+        let parsed = fraction
+            .parse::<i64>()
+            .map_err(|_| StatementError::MalformedAmount)?;
+        let padding = 10_i64.pow(u32::from(profile.fractional_digits) - fraction.len() as u32);
+        value = value
+            .checked_add(
+                parsed
+                    .checked_mul(padding)
+                    .ok_or(StatementError::ArithmeticOverflow)?,
+            )
+            .ok_or(StatementError::ArithmeticOverflow)?;
+    }
+    if profile.fractional_digits < 2 {
+        value = value
+            .checked_mul(10_i64.pow(u32::from(2 - profile.fractional_digits)))
+            .ok_or(StatementError::ArithmeticOverflow)?;
+    }
+    if negative ^ negate {
+        value = value
+            .checked_neg()
+            .ok_or(StatementError::ArithmeticOverflow)?;
+    }
+    Ok(Amount(value))
+}
+
+fn canonical_date(text: &str, format: DateFormat) -> Result<String, StatementError> {
+    if text.is_empty() {
+        return Err(StatementError::MissingOrInvalidDate);
+    }
+    let (year, month, day) = match format {
+        DateFormat::Iso8601 => date_parts(text, '-')?,
+        DateFormat::DayMonthYearSlash => {
+            let (day, month, year) = date_parts(text, '/')?;
+            (year, month, day)
+        }
+    };
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return Err(StatementError::MissingOrInvalidDate),
+    };
+    if year == 0 || day == 0 || day > max_day {
+        return Err(StatementError::MissingOrInvalidDate);
+    }
+    Ok(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+fn date_parts(text: &str, separator: char) -> Result<(u32, u32, u32), StatementError> {
+    let parts = text
+        .split(separator)
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| StatementError::MissingOrInvalidDate)?;
+    if parts.len() != 3 {
+        return Err(StatementError::MissingOrInvalidDate);
+    }
+    Ok((parts[0], parts[1], parts[2]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn signed_profile() -> StatementProfile {
+        StatementProfile {
+            version: 1,
+            id: "synthetic-pipe-v1".to_owned(),
+            delimiter: b'|',
+            has_header: true,
+            date_column: 1,
+            date_format: DateFormat::Iso8601,
+            amount: AmountLayout::Signed { column: 2 },
+            decimal_separator: b'.',
+            fractional_digits: 2,
+            currency: "SEK".to_owned(),
+            currency_column: Some(3),
+            identity_column: 0,
+            description_column: Some(4),
+        }
+    }
+
+    fn split_profile() -> StatementProfile {
+        StatementProfile {
+            version: 1,
+            id: "synthetic-semicolon-v1".to_owned(),
+            delimiter: b';',
+            has_header: false,
+            date_column: 0,
+            date_format: DateFormat::DayMonthYearSlash,
+            amount: AmountLayout::DebitCredit {
+                debit_column: 2,
+                credit_column: 3,
+            },
+            decimal_separator: b',',
+            fractional_digits: 2,
+            currency: "SEK".to_owned(),
+            currency_column: None,
+            identity_column: 1,
+            description_column: Some(4),
+        }
+    }
+
+    #[test]
+    fn two_formats_are_profile_data_and_produce_identical_canonical_values() {
+        let ledger = vec![LedgerBalanceAtCutoff {
+            account: "bank".to_owned(),
+            amount: Amount(4_200),
+        }];
+        let pipe = admit_statement(
+            &signed_profile(),
+            "export-a",
+            "2026-08-25",
+            b"id|date|amount|currency|text\na1|2026-08-24|-12.50|SEK|Coffee\na2|2026-08-25|54.50|SEK|Invoice\n",
+            ledger.clone(),
+        )
+        .unwrap();
+        let semi = admit_statement(
+            &split_profile(),
+            "export-b",
+            "2026-08-25",
+            b"24/08/2026;b1;12,50;;Coffee\n25/08/2026;b2;;54,50;Invoice\n",
+            ledger,
+        )
+        .unwrap();
+        let values = |admission: &StatementAdmission| {
+            admission
+                .snapshot
+                .rows
+                .iter()
+                .map(|row| (row.date.clone(), row.amount, row.description.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(values(&pipe), values(&semi));
+        assert_eq!(pipe.snapshot.total, Amount(4_200));
+        assert_eq!(pipe.snapshot.cutoff, semi.snapshot.cutoff);
+        assert_eq!(pipe.snapshot.ledger_balances, semi.snapshot.ledger_balances);
+        assert_eq!(
+            pipe.snapshot.rows[0].original_bytes,
+            b"a1|2026-08-24|-12.50|SEK|Coffee"
+        );
+        assert_eq!(pipe.snapshot.rows[0].source_ref, "export-a");
+        assert_eq!(pipe.snapshot.rows[0].ordinal, 2);
+    }
+
+    #[test]
+    fn every_bad_row_is_typed_and_absent_from_snapshot() {
+        let input = b"id|date|amount|currency|text\n\
+ok|2026-08-20|1.00|SEK|accepted\n\
+fx|2026-08-21|2.00|EUR|mixed\n\
+precise|2026-08-21|1.001|SEK|precision\n\
+sign|2026-08-21|+1.00|SEK|sign\n\
+date||1.00|SEK|date\n\
+ok|2026-08-22|1.00|SEK|duplicate\n\
+broken|2026-08-22|wat|SEK|malformed\n\
+overflow|2026-08-22|92233720368547758.08|SEK|overflow\n";
+        let admitted = admit_statement(
+            &signed_profile(),
+            "reject-fixture",
+            "2026-08-25",
+            input,
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(admitted.snapshot.rows.len(), 1);
+        assert_eq!(admitted.snapshot.rows[0].source_identity, "ok");
+        assert_eq!(admitted.rejected.len(), 7);
+        assert!(matches!(
+            admitted.rejected[0].reason,
+            StatementError::MixedCurrency { .. }
+        ));
+        assert_eq!(admitted.rejected[1].reason, StatementError::ExcessPrecision);
+        assert_eq!(admitted.rejected[2].reason, StatementError::AmbiguousSign);
+        assert_eq!(
+            admitted.rejected[3].reason,
+            StatementError::MissingOrInvalidDate
+        );
+        assert!(matches!(
+            admitted.rejected[4].reason,
+            StatementError::DuplicateSourceIdentity(_)
+        ));
+        assert_eq!(admitted.rejected[5].reason, StatementError::MalformedAmount);
+        assert_eq!(
+            admitted.rejected[6].reason,
+            StatementError::ArithmeticOverflow
+        );
+    }
+
+    #[test]
+    fn split_amount_refuses_ambiguous_sign_and_profile_requires_migration() {
+        let admitted = admit_statement(
+            &split_profile(),
+            "ambiguous",
+            "2026-08-25",
+            b"25/08/2026;x;1,00;2,00;both\n25/08/2026;y;;;neither\n",
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(admitted.snapshot.rows.is_empty());
+        assert!(
+            admitted
+                .rejected
+                .iter()
+                .all(|row| row.reason == StatementError::AmbiguousSign)
+        );
+
+        let mut future = signed_profile();
+        future.version = 2;
+        assert_eq!(
+            admit_statement(&future, "future", "2026-08-25", b"", Vec::new()).unwrap_err(),
+            StatementError::UnsupportedProfileVersion {
+                found: 2,
+                supported: 1
+            }
+        );
+    }
+
+    #[test]
+    fn snapshot_sum_overflow_refuses_only_the_overflowing_row() {
+        let input = b"id|date|amount|currency|text\na|2026-08-25|92233720368547758.07|SEK|max\nb|2026-08-25|0.01|SEK|overflow\n";
+        let admitted = admit_statement(
+            &signed_profile(),
+            "sum-overflow",
+            "2026-08-25",
+            input,
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(admitted.snapshot.rows.len(), 1);
+        assert_eq!(admitted.snapshot.total, Amount(i64::MAX));
+        assert_eq!(
+            admitted.rejected[0].reason,
+            StatementError::ArithmeticOverflow
+        );
+    }
+
+    #[test]
+    fn rejected_row_does_not_reserve_identity_and_header_is_first_non_empty_record() {
+        let input = b"\nid|date|amount|currency|text\nreuse||1.00|SEK|bad\nreuse|2026-08-25|1.00|SEK|good\n";
+        let admitted = admit_statement(
+            &signed_profile(),
+            "retry-identity",
+            "2026-08-25",
+            input,
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(admitted.snapshot.rows.len(), 1);
+        assert_eq!(
+            admitted.snapshot.rows[0].version,
+            CANONICAL_STATEMENT_ROW_VERSION
+        );
+        assert_eq!(admitted.snapshot.rows[0].source_identity, "reuse");
+        assert_eq!(admitted.snapshot.rows[0].ordinal, 4);
+        assert_eq!(admitted.rejected.len(), 1);
+        assert_eq!(
+            admitted.rejected[0].reason,
+            StatementError::MissingOrInvalidDate
+        );
+    }
+}
+```
+
+### `feature/sim-ledger/exact-reconciliation`
+
+Specimen `spec-test/sim-ledger/crates/sim-ledger/src/reconciliation` is checked by `cargo test`.
+
+Source `crates/sim-ledger/src/reconciliation.rs`:
+
+```rust
+//! Exact, human-decided reconciliation and independently recomputable certificates.
+//!
+//! Candidate scores order review only. They are never accepted implicitly and
+//! this module has no operation that posts a voucher or approves a correction.
+
+// conformance: reconciliation certificates fail closed under altered or incomplete evidence.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+use crate::{Amount, CanonicalStatementRow, Posting, StatementSnapshot, is_balanced};
+
+/// One immutable ledger movement presented for reconciliation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerMovement {
+    /// Stable voucher identity in the frozen ledger snapshot.
+    pub voucher_id: i64,
+    /// Exact signed movement of the reconciled account.
+    pub amount: Amount,
+    /// Currency of the reconciled account.
+    pub currency: String,
+    /// ISO-8601 posting date.
+    pub date: String,
+    /// Optional bounded matching text.
+    pub text: Option<String>,
+}
+
+/// Frozen statement and ledger inputs. The verifier receives this independently.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReconciliationInputs {
+    /// Human-declared identity of this input set.
+    pub snapshot_ref: String,
+    /// Stable identity of the human who alone may decide this reconciliation.
+    pub reviewer_ref: String,
+    /// Canonical statement snapshot.
+    pub statement: StatementSnapshot,
+    /// Exact in-scope ledger movements.
+    pub movements: Vec<LedgerMovement>,
+}
+
+/// Explicit limits for deterministic candidate enumeration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CandidateBounds {
+    /// Maximum total combinations examined.
+    pub max_work: usize,
+    /// Maximum candidates returned.
+    pub max_results: usize,
+    /// Maximum members on the grouped side (at least one).
+    pub max_cardinality: usize,
+    /// Maximum absolute date separation used by a candidate.
+    pub max_date_distance_days: u32,
+}
+
+/// Supported exact candidate shapes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum CandidateKind {
+    /// One statement row to one ledger movement.
+    OneToOne,
+    /// One statement row to multiple ledger movements.
+    OneToMany,
+    /// Multiple statement rows to one ledger movement.
+    ManyToOne,
+}
+
+/// A possible exact match. It is review material, never a decision.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Candidate {
+    /// Candidate shape.
+    pub kind: CandidateKind,
+    /// Exact statement row identities.
+    pub row_ids: Vec<String>,
+    /// Exact voucher identities.
+    pub voucher_ids: Vec<i64>,
+    /// Lower values appear first in review. This has no accounting authority.
+    pub review_rank: u64,
+}
+
+/// Immutable references selected by Mia.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReconciliationRef {
+    /// Exact statement row identities.
+    pub row_ids: Vec<String>,
+    /// Exact ledger voucher identities.
+    pub voucher_ids: Vec<i64>,
+}
+
+/// Human-authored outcome for a reviewed set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DecisionDisposition {
+    /// The exact sets reconcile.
+    Accept,
+    /// The proposed relation was rejected.
+    Reject,
+    /// Mia split a proposed group; the refs name the accepted resulting part.
+    Split,
+    /// Mia merged proposed groups; the refs name the accepted resulting group.
+    Merge,
+    /// Review remains unresolved.
+    Defer,
+}
+
+/// Immutable human decision record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionRecord {
+    /// Stable journal/event identity.
+    pub decision_ref: String,
+    /// Human identity that authored the immutable decision.
+    pub decided_by: String,
+    /// Mia's disposition.
+    pub disposition: DecisionDisposition,
+    /// Exact sets reviewed or accepted.
+    pub evidence: ReconciliationRef,
+}
+
+/// Accepted decision copied into a certificate.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcceptedDecision {
+    /// Stable journal/event identity.
+    pub decision_ref: String,
+    /// Accept, split, or merge.
+    pub disposition: DecisionDisposition,
+    /// Exact sets covered by the decision.
+    pub evidence: ReconciliationRef,
+    /// Exact statement-side sum.
+    pub row_total: Amount,
+    /// Exact ledger-side sum.
+    pub movement_total: Amount,
+    /// Human authority copied from the validated input (prevents raw decisions
+    /// from being used directly as posting authority through the Rust API).
+    reviewer_ref: String,
+}
+
+/// Recomputable proof artifact. Derived fields are not trusted by the verifier.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReconciliationCertificate {
+    /// Input identity asserted by the issuer.
+    pub snapshot_ref: String,
+    /// Exact cutoff asserted by the issuer.
+    pub cutoff: String,
+    /// Exact frozen source inputs bound into this certificate.
+    pub source_inputs: ReconciliationInputs,
+    /// Every immutable decision, including rejects and deferrals.
+    pub decision_records: Vec<DecisionRecord>,
+    /// Accepted human evidence.
+    pub accepted: Vec<AcceptedDecision>,
+    /// Statement rows not covered by accepted evidence.
+    pub uncovered_rows: Vec<String>,
+    /// Ledger movements not covered by accepted evidence.
+    pub uncovered_vouchers: Vec<i64>,
+    /// Statement snapshot total.
+    pub statement_total: Amount,
+    /// Sum of frozen ledger movements.
+    pub ledger_total: Amount,
+    /// Exact bridge residual (`statement_total - ledger_total`).
+    pub residual: Amount,
+    /// True only for complete coverage and zero residual.
+    pub closed: bool,
+}
+
+/// Independently recomputed verification report.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReconciliationReport {
+    /// Recomputed certificate, byte-structure comparable to the supplied one.
+    pub recomputed: ReconciliationCertificate,
+}
+
+/// A balanced correction proposal. Approval deliberately belongs outside this API.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CorrectionDraft {
+    /// Human decision authorizing preparation (not posting).
+    pub decision_ref: String,
+    /// Exact balanced ledger posting lines.
+    pub postings: Vec<Posting>,
+}
+
+/// Exact reconciliation refusal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReconciliationError {
+    /// A configured bound is zero or otherwise invalid.
+    InvalidBounds,
+    /// Candidate enumeration reached its explicit work bound.
+    WorkBoundExceeded,
+    /// An identity is empty or duplicated in an input snapshot.
+    InvalidInput(&'static str),
+    /// A decision reference is empty or occurs more than once.
+    InvalidDecisionRef,
+    /// A decision names a row or voucher outside the snapshot.
+    UnknownEvidence,
+    /// A decision was not authored by the declared human reviewer.
+    WrongReviewer,
+    /// Accepted evidence uses an item more than once.
+    DuplicateCoverage,
+    /// Accepted evidence has no row or no voucher.
+    EmptyAcceptedSet,
+    /// Exact arithmetic overflowed.
+    ArithmeticOverflow,
+    /// A certificate differs from independent recomputation.
+    CertificateMismatch,
+    /// Closing was requested with uncovered evidence or a nonzero residual.
+    IncompleteClose,
+    /// Correction lines are empty or not exactly balanced.
+    UnbalancedCorrection,
+    /// Only an accepted human decision may support a correction draft.
+    CorrectionNotAccepted,
+}
+
+impl fmt::Display for ReconciliationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for ReconciliationError {}
+
+/// Deterministically enumerate exact one-to-one and bounded grouped candidates.
+pub fn generate_candidates(
+    inputs: &ReconciliationInputs,
+    bounds: CandidateBounds,
+) -> Result<Vec<Candidate>, ReconciliationError> {
+    validate_inputs(inputs)?;
+    if bounds.max_work == 0 || bounds.max_results == 0 || bounds.max_cardinality == 0 {
+        return Err(ReconciliationError::InvalidBounds);
+    }
+    let rows = &inputs.statement.rows;
+    let movements = &inputs.movements;
+    let mut candidates = Vec::new();
+    let mut work = 0usize;
+    for row_size in 1..=bounds.max_cardinality.min(rows.len()) {
+        for row_indices in combinations(rows.len(), row_size) {
+            for movement_size in 1..=bounds.max_cardinality.min(movements.len()) {
+                if row_size > 1 && movement_size > 1 {
+                    continue;
+                }
+                for movement_indices in combinations(movements.len(), movement_size) {
+                    work = work
+                        .checked_add(1)
+                        .ok_or(ReconciliationError::ArithmeticOverflow)?;
+                    if work > bounds.max_work {
+                        return Err(ReconciliationError::WorkBoundExceeded);
+                    }
+                    if exact_candidate(rows, movements, &row_indices, &movement_indices, bounds)? {
+                        let kind = match (row_size, movement_size) {
+                            (1, 1) => CandidateKind::OneToOne,
+                            (1, _) => CandidateKind::OneToMany,
+                            (_, 1) => CandidateKind::ManyToOne,
+                            _ => unreachable!(),
+                        };
+                        let date_distance =
+                            max_date_distance(rows, movements, &row_indices, &movement_indices)?;
+                        let text_penalty =
+                            text_penalty(rows, movements, &row_indices, &movement_indices);
+                        candidates.push(Candidate {
+                            kind,
+                            row_ids: row_indices
+                                .iter()
+                                .map(|&i| rows[i].source_identity.clone())
+                                .collect(),
+                            voucher_ids: movement_indices
+                                .iter()
+                                .map(|&i| movements[i].voucher_id)
+                                .collect(),
+                            review_rank: u64::from(date_distance) * 2 + u64::from(text_penalty),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    candidates.sort_by(|a, b| {
+        (a.review_rank, a.kind, &a.row_ids, &a.voucher_ids).cmp(&(
+            b.review_rank,
+            b.kind,
+            &b.row_ids,
+            &b.voucher_ids,
+        ))
+    });
+    candidates.truncate(bounds.max_results);
+    Ok(candidates)
+}
+
+/// Build a certificate solely from frozen inputs and immutable decisions.
+pub fn build_certificate(
+    inputs: &ReconciliationInputs,
+    decisions: &[DecisionRecord],
+    request_close: bool,
+) -> Result<ReconciliationCertificate, ReconciliationError> {
+    validate_inputs(inputs)?;
+    let rows = inputs
+        .statement
+        .rows
+        .iter()
+        .map(|r| (r.source_identity.as_str(), r))
+        .collect::<BTreeMap<_, _>>();
+    let movements = inputs
+        .movements
+        .iter()
+        .map(|m| (m.voucher_id, m))
+        .collect::<BTreeMap<_, _>>();
+    let mut decision_refs = BTreeSet::new();
+    let mut covered_rows = BTreeSet::new();
+    let mut covered_vouchers = BTreeSet::new();
+    let mut accepted = Vec::new();
+    for decision in decisions {
+        if decision.decision_ref.is_empty() || !decision_refs.insert(&decision.decision_ref) {
+            return Err(ReconciliationError::InvalidDecisionRef);
+        }
+        if decision.decided_by != inputs.reviewer_ref {
+            return Err(ReconciliationError::WrongReviewer);
+        }
+        let is_accepted = matches!(
+            decision.disposition,
+            DecisionDisposition::Accept | DecisionDisposition::Split | DecisionDisposition::Merge
+        );
+        if !is_accepted {
+            continue;
+        }
+        if decision.evidence.row_ids.is_empty() || decision.evidence.voucher_ids.is_empty() {
+            return Err(ReconciliationError::EmptyAcceptedSet);
+        }
+        let mut row_total = 0_i64;
+        for id in &decision.evidence.row_ids {
+            let row = rows
+                .get(id.as_str())
+                .ok_or(ReconciliationError::UnknownEvidence)?;
+            if !covered_rows.insert(id.clone()) {
+                return Err(ReconciliationError::DuplicateCoverage);
+            }
+            row_total = row_total
+                .checked_add(row.amount.0)
+                .ok_or(ReconciliationError::ArithmeticOverflow)?;
+        }
+        let mut movement_total = 0_i64;
+        for id in &decision.evidence.voucher_ids {
+            let movement = movements
+                .get(id)
+                .ok_or(ReconciliationError::UnknownEvidence)?;
+            if !covered_vouchers.insert(*id) {
+                return Err(ReconciliationError::DuplicateCoverage);
+            }
+            movement_total = movement_total
+                .checked_add(movement.amount.0)
+                .ok_or(ReconciliationError::ArithmeticOverflow)?;
+        }
+        if row_total != movement_total {
+            return Err(ReconciliationError::UnknownEvidence);
+        }
+        accepted.push(AcceptedDecision {
+            decision_ref: decision.decision_ref.clone(),
+            disposition: decision.disposition,
+            evidence: decision.evidence.clone(),
+            row_total: Amount(row_total),
+            movement_total: Amount(movement_total),
+            reviewer_ref: inputs.reviewer_ref.clone(),
+        });
+    }
+    let uncovered_rows = rows
+        .keys()
+        .filter(|id| !covered_rows.contains(**id))
+        .map(|id| (*id).to_owned())
+        .collect::<Vec<_>>();
+    let uncovered_vouchers = movements
+        .keys()
+        .filter(|id| !covered_vouchers.contains(id))
+        .copied()
+        .collect::<Vec<_>>();
+    let ledger_total = checked_sum(inputs.movements.iter().map(|m| m.amount.0))?;
+    let residual = inputs
+        .statement
+        .total
+        .0
+        .checked_sub(ledger_total)
+        .ok_or(ReconciliationError::ArithmeticOverflow)?;
+    let closed = uncovered_rows.is_empty() && uncovered_vouchers.is_empty() && residual == 0;
+    if request_close && !closed {
+        return Err(ReconciliationError::IncompleteClose);
+    }
+    Ok(ReconciliationCertificate {
+        snapshot_ref: inputs.snapshot_ref.clone(),
+        cutoff: inputs.statement.cutoff.clone(),
+        source_inputs: inputs.clone(),
+        decision_records: decisions.to_vec(),
+        accepted,
+        uncovered_rows,
+        uncovered_vouchers,
+        statement_total: inputs.statement.total,
+        ledger_total: Amount(ledger_total),
+        residual: Amount(residual),
+        closed,
+    })
+}
+
+/// Reload inputs and decisions, recompute every derived field, and compare exactly.
+pub fn verify_certificate(
+    inputs: &ReconciliationInputs,
+    decisions: &[DecisionRecord],
+    certificate: &ReconciliationCertificate,
+) -> Result<ReconciliationReport, ReconciliationError> {
+    if &certificate.source_inputs != inputs || certificate.decision_records != decisions {
+        return Err(ReconciliationError::CertificateMismatch);
+    }
+    let recomputed = build_certificate(inputs, decisions, certificate.closed)?;
+    if &recomputed != certificate {
+        return Err(ReconciliationError::CertificateMismatch);
+    }
+    Ok(ReconciliationReport { recomputed })
+}
+
+/// Prepare an exactly balanced correction; this function cannot approve or post it.
+pub fn prepare_correction_draft(
+    decision: &AcceptedDecision,
+    postings: Vec<Posting>,
+) -> Result<CorrectionDraft, ReconciliationError> {
+    if postings.is_empty() || !is_balanced(&postings) {
+        return Err(ReconciliationError::UnbalancedCorrection);
+    }
+    Ok(CorrectionDraft {
+        decision_ref: decision.decision_ref.clone(),
+        postings,
+    })
+}
+
+fn validate_inputs(inputs: &ReconciliationInputs) -> Result<(), ReconciliationError> {
+    if inputs.snapshot_ref.is_empty()
+        || inputs.reviewer_ref.is_empty()
+        || inputs.statement.cutoff.is_empty()
+    {
+        return Err(ReconciliationError::InvalidInput(
+            "empty snapshot identity or cutoff",
+        ));
+    }
+    let mut row_ids = BTreeSet::new();
+    let mut currency: Option<&str> = None;
+    for row in &inputs.statement.rows {
+        if row.source_identity.is_empty() || !row_ids.insert(&row.source_identity) {
+            return Err(ReconciliationError::InvalidInput(
+                "duplicate statement row identity",
+            ));
+        }
+        if row.currency.is_empty() {
+            return Err(ReconciliationError::InvalidInput("empty currency"));
+        }
+        match currency {
+            Some(expected) if expected != row.currency => {
+                return Err(ReconciliationError::InvalidInput("mixed currency"));
+            }
+            None => currency = Some(&row.currency),
+            _ => {}
+        }
+    }
+    let mut voucher_ids = BTreeSet::new();
+    for movement in &inputs.movements {
+        if movement.currency.is_empty() || !voucher_ids.insert(movement.voucher_id) {
+            return Err(ReconciliationError::InvalidInput(
+                "duplicate ledger voucher identity",
+            ));
+        }
+        match currency {
+            Some(expected) if expected != movement.currency => {
+                return Err(ReconciliationError::InvalidInput("mixed currency"));
+            }
+            None => currency = Some(&movement.currency),
+            _ => {}
+        }
+    }
+    let total = checked_sum(inputs.statement.rows.iter().map(|r| r.amount.0))?;
+    if total != inputs.statement.total.0 {
+        return Err(ReconciliationError::InvalidInput(
+            "fabricated statement total",
+        ));
+    }
+    Ok(())
+}
+
+fn exact_candidate(
+    rows: &[CanonicalStatementRow],
+    movements: &[LedgerMovement],
+    ri: &[usize],
+    mi: &[usize],
+    bounds: CandidateBounds,
+) -> Result<bool, ReconciliationError> {
+    let currency = &rows[ri[0]].currency;
+    if ri.iter().any(|&i| &rows[i].currency != currency)
+        || mi.iter().any(|&i| &movements[i].currency != currency)
+    {
+        return Ok(false);
+    }
+    let row_total = checked_sum(ri.iter().map(|&i| rows[i].amount.0))?;
+    let movement_total = checked_sum(mi.iter().map(|&i| movements[i].amount.0))?;
+    Ok(row_total == movement_total
+        && max_date_distance(rows, movements, ri, mi)? <= bounds.max_date_distance_days)
+}
+
+fn max_date_distance(
+    rows: &[CanonicalStatementRow],
+    movements: &[LedgerMovement],
+    ri: &[usize],
+    mi: &[usize],
+) -> Result<u32, ReconciliationError> {
+    let mut max = 0;
+    for &r in ri {
+        for &m in mi {
+            max = max.max(date_distance(&rows[r].date, &movements[m].date)?);
+        }
+    }
+    Ok(max)
+}
+
+fn text_penalty(
+    rows: &[CanonicalStatementRow],
+    movements: &[LedgerMovement],
+    ri: &[usize],
+    mi: &[usize],
+) -> u32 {
+    let row_words = ri
+        .iter()
+        .filter_map(|&i| rows[i].description.as_deref())
+        .flat_map(words)
+        .collect::<BTreeSet<_>>();
+    let movement_words = mi
+        .iter()
+        .filter_map(|&i| movements[i].text.as_deref())
+        .flat_map(words)
+        .collect::<BTreeSet<_>>();
+    u32::from(row_words.is_disjoint(&movement_words))
+}
+
+fn words(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+}
+
+fn checked_sum(mut values: impl Iterator<Item = i64>) -> Result<i64, ReconciliationError> {
+    values.try_fold(0_i64, |sum, value| {
+        sum.checked_add(value)
+            .ok_or(ReconciliationError::ArithmeticOverflow)
+    })
+}
+
+fn combinations(len: usize, size: usize) -> Vec<Vec<usize>> {
+    fn visit(
+        start: usize,
+        len: usize,
+        left: usize,
+        current: &mut Vec<usize>,
+        out: &mut Vec<Vec<usize>>,
+    ) {
+        if left == 0 {
+            out.push(current.clone());
+            return;
+        }
+        for index in start..=len - left {
+            current.push(index);
+            visit(index + 1, len, left - 1, current, out);
+            current.pop();
+        }
+    }
+    if size == 0 || size > len {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    visit(0, len, size, &mut Vec::new(), &mut out);
+    out
+}
+
+fn date_distance(left: &str, right: &str) -> Result<u32, ReconciliationError> {
+    let ordinal = |date: &str| -> Result<i64, ReconciliationError> {
+        let mut parts = date.split('-').map(str::parse::<i64>);
+        let year = parts
+            .next()
+            .and_then(Result::ok)
+            .ok_or(ReconciliationError::InvalidInput("invalid date"))?;
+        let month = parts
+            .next()
+            .and_then(Result::ok)
+            .ok_or(ReconciliationError::InvalidInput("invalid date"))?;
+        let day = parts
+            .next()
+            .and_then(Result::ok)
+            .ok_or(ReconciliationError::InvalidInput("invalid date"))?;
+        if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+            return Err(ReconciliationError::InvalidInput("invalid date"));
+        }
+        let adjusted = year - i64::from(month <= 2);
+        let era = adjusted.div_euclid(400);
+        let yoe = adjusted - era * 400;
+        let shifted_month = month + if month > 2 { -3 } else { 9 };
+        Ok(
+            era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + (153 * shifted_month + 2) / 5 + day
+                - 1,
+        )
+    };
+    u32::try_from((ordinal(left)? - ordinal(right)?).abs())
+        .map_err(|_| ReconciliationError::ArithmeticOverflow)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CANONICAL_STATEMENT_ROW_VERSION, LedgerBalanceAtCutoff};
+
+    fn row(id: &str, date: &str, amount: i64, text: &str) -> CanonicalStatementRow {
+        CanonicalStatementRow {
+            version: CANONICAL_STATEMENT_ROW_VERSION,
+            date: date.into(),
+            amount: Amount(amount),
+            currency: "SEK".into(),
+            description: Some(text.into()),
+            source_identity: id.into(),
+            source_ref: "bank-export".into(),
+            ordinal: 1,
+            profile_id: "bank-v1".into(),
+            original_bytes: id.as_bytes().to_vec(),
+        }
+    }
+    fn movement(id: i64, date: &str, amount: i64, text: &str) -> LedgerMovement {
+        LedgerMovement {
+            voucher_id: id,
+            amount: Amount(amount),
+            currency: "SEK".into(),
+            date: date.into(),
+            text: Some(text.into()),
+        }
+    }
+    fn inputs() -> ReconciliationInputs {
+        let rows = vec![
+            row("fee", "2026-01-02", -10, "bank fee"),
+            row("transfer", "2026-01-03", -100, "transfer"),
+            row("dep-a", "2026-01-04", 40, "deposit"),
+            row("dep-b", "2026-01-04", 60, "deposit"),
+        ];
+        ReconciliationInputs {
+            snapshot_ref: "sha256:fixture".into(),
+            reviewer_ref: "mia".into(),
+            statement: StatementSnapshot {
+                cutoff: "2026-01-31".into(),
+                source_ref: "bank-export".into(),
+                profile_id: "bank-v1".into(),
+                total: Amount(-10),
+                rows,
+                ledger_balances: vec![LedgerBalanceAtCutoff {
+                    account: "1930".into(),
+                    amount: Amount(-10),
+                }],
+            },
+            movements: vec![
+                movement(1, "2026-01-02", -10, "fee reversal"),
+                movement(2, "2026-01-03", -40, "transfer"),
+                movement(3, "2026-01-03", -60, "transfer"),
+                movement(4, "2026-01-04", 100, "grouped deposit"),
+            ],
+        }
+    }
+    fn decisions() -> Vec<DecisionRecord> {
+        vec![
+            decision("d-fee", DecisionDisposition::Accept, &["fee"], &[1]),
+            decision(
+                "d-transfer",
+                DecisionDisposition::Merge,
+                &["transfer"],
+                &[2, 3],
+            ),
+            decision(
+                "d-deposit",
+                DecisionDisposition::Split,
+                &["dep-a", "dep-b"],
+                &[4],
+            ),
+        ]
+    }
+    fn decision(
+        id: &str,
+        disposition: DecisionDisposition,
+        rows: &[&str],
+        vouchers: &[i64],
+    ) -> DecisionRecord {
+        DecisionRecord {
+            decision_ref: id.into(),
+            decided_by: "mia".into(),
+            disposition,
+            evidence: ReconciliationRef {
+                row_ids: rows.iter().map(|s| (*s).into()).collect(),
+                voucher_ids: vouchers.to_vec(),
+            },
+        }
+    }
+
+    #[test]
+    fn candidates_are_exact_bounded_and_ranking_has_no_authority() {
+        let candidates = generate_candidates(
+            &inputs(),
+            CandidateBounds {
+                max_work: 200,
+                max_results: 20,
+                max_cardinality: 2,
+                max_date_distance_days: 2,
+            },
+        )
+        .unwrap();
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.kind == CandidateKind::OneToOne && c.row_ids == ["fee"])
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.kind == CandidateKind::OneToMany && c.row_ids == ["transfer"])
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.kind == CandidateKind::ManyToOne && c.row_ids == ["dep-a", "dep-b"])
+        );
+        assert!(build_certificate(&inputs(), &[], true).is_err());
+        assert_eq!(
+            generate_candidates(
+                &inputs(),
+                CandidateBounds {
+                    max_work: 1,
+                    max_results: 20,
+                    max_cardinality: 2,
+                    max_date_distance_days: 2
+                }
+            ),
+            Err(ReconciliationError::WorkBoundExceeded)
+        );
+    }
+
+    #[test]
+    fn real_closed_fixture_verifies_from_empty_derived_state() {
+        let certificate = build_certificate(&inputs(), &decisions(), true).unwrap();
+        assert!(certificate.closed);
+        assert_eq!(certificate.residual, Amount(0));
+        let report = verify_certificate(&inputs(), &decisions(), &certificate).unwrap();
+        assert_eq!(report.recomputed, certificate);
+    }
+
+    #[test]
+    fn every_source_or_derived_mutation_breaks_independent_verification() {
+        let source = inputs();
+        let decisions = decisions();
+        let certificate = build_certificate(&source, &decisions, true).unwrap();
+        let mut mutations: Vec<(
+            ReconciliationInputs,
+            Vec<DecisionRecord>,
+            ReconciliationCertificate,
+        )> = Vec::new();
+        let mut altered = source.clone();
+        altered.statement.rows[0].amount = Amount(-11);
+        altered.statement.total = Amount(-11);
+        mutations.push((altered, decisions.clone(), certificate.clone()));
+        let mut cutoff = source.clone();
+        cutoff.statement.cutoff = "2026-02-01".into();
+        mutations.push((cutoff, decisions.clone(), certificate.clone()));
+        let mut voucher = source.clone();
+        voucher.movements[0].amount = Amount(-11);
+        mutations.push((voucher, decisions.clone(), certificate.clone()));
+        let mut changed_decision = decisions.clone();
+        changed_decision[0].evidence.row_ids[0] = "transfer".into();
+        mutations.push((source.clone(), changed_decision, certificate.clone()));
+        let mut rejected_change = decisions.clone();
+        rejected_change.push(decision(
+            "rejected",
+            DecisionDisposition::Reject,
+            &["fee"],
+            &[1],
+        ));
+        mutations.push((source.clone(), rejected_change, certificate.clone()));
+        let mut descriptive_change = source.clone();
+        descriptive_change.statement.rows[0].description = Some("changed evidence".into());
+        mutations.push((descriptive_change, decisions.clone(), certificate.clone()));
+        let mut fabricated = certificate.clone();
+        fabricated.residual = Amount(0);
+        fabricated.ledger_total = Amount(-11);
+        mutations.push((source.clone(), decisions.clone(), fabricated));
+        for (input, decision, cert) in mutations {
+            assert!(verify_certificate(&input, &decision, &cert).is_err());
+        }
+    }
+
+    #[test]
+    fn duplicate_unresolved_overflow_and_wrong_currency_fail_closed() {
+        let mut duplicate = decisions();
+        duplicate.push(decision(
+            "duplicate",
+            DecisionDisposition::Accept,
+            &["fee"],
+            &[1],
+        ));
+        assert_eq!(
+            build_certificate(&inputs(), &duplicate, false),
+            Err(ReconciliationError::DuplicateCoverage)
+        );
+        let partial = build_certificate(&inputs(), &decisions()[..1], false).unwrap();
+        assert!(!partial.closed);
+        assert!(!partial.uncovered_rows.is_empty());
+        assert_eq!(
+            build_certificate(&inputs(), &decisions()[..1], true),
+            Err(ReconciliationError::IncompleteClose)
+        );
+        let mut overflow = inputs();
+        overflow.statement.rows = vec![
+            row("a", "2026-01-01", i64::MAX, "a"),
+            row("b", "2026-01-01", 1, "b"),
+        ];
+        overflow.statement.total = Amount(0);
+        assert_eq!(
+            build_certificate(&overflow, &[], false),
+            Err(ReconciliationError::ArithmeticOverflow)
+        );
+        let mut currency = inputs();
+        currency.movements[0].currency = "EUR".into();
+        assert_eq!(
+            generate_candidates(
+                &currency,
+                CandidateBounds {
+                    max_work: 200,
+                    max_results: 20,
+                    max_cardinality: 2,
+                    max_date_distance_days: 2,
+                },
+            ),
+            Err(ReconciliationError::InvalidInput("mixed currency"))
+        );
+    }
+
+    #[test]
+    fn rejection_and_deferral_cover_nothing_and_correction_needs_mia_acceptance() {
+        let rejected = decision("no", DecisionDisposition::Reject, &["fee"], &[1]);
+        let deferred = decision("later", DecisionDisposition::Defer, &["transfer"], &[2, 3]);
+        let certificate =
+            build_certificate(&inputs(), &[rejected.clone(), deferred], false).unwrap();
+        assert_eq!(certificate.uncovered_rows.len(), 4);
+        let postings = vec![
+            Posting {
+                id: 0,
+                source_id: None,
+                voucher_id: 0,
+                account: 1930,
+                amount: Amount(10),
+                text: Some("fee reversal".into()),
+            },
+            Posting {
+                id: 0,
+                source_id: None,
+                voucher_id: 0,
+                account: 6570,
+                amount: Amount(-10),
+                text: Some("fee reversal".into()),
+            },
+        ];
+        let certificate = build_certificate(&inputs(), &decisions(), true).unwrap();
+        let draft = prepare_correction_draft(&certificate.accepted[0], postings).unwrap();
+        assert!(is_balanced(&draft.postings));
+        assert_eq!(
+            prepare_correction_draft(&certificate.accepted[0], vec![draft.postings[0].clone()]),
+            Err(ReconciliationError::UnbalancedCorrection)
+        );
     }
 }
 ```
