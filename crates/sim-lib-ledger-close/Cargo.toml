@@ -14,7 +14,7 @@ sim-ledger = { version = "0.1.0", path = "../sim-ledger" }
 
 [dev-dependencies]
 sim-ledger-test-support = { path = "../sim-ledger-test-support" }
-sim-storage-port = { version = "0.1.0" }
+sim-storage-port = { version = "0.2.0" }
 
 [lints]
 workspace = true

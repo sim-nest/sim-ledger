@@ -9,8 +9,8 @@ description = "Provider-neutral relational year-file port for SIM ledger"
 readme = "README.md"
 
 [dependencies]
-sim-relation-site = { version = "0.1.0" }
-sim-storage-port = { version = "0.1.0" }
+sim-relation-site = { version = "0.2.0" }
+sim-storage-port = { version = "0.2.0" }
 
 [lints]
 workspace = true

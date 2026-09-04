@@ -16,7 +16,7 @@ sim-lib-ledger-books = { version = "0.1.0", path = "../sim-lib-ledger-books" }
 sim-lib-ledger-close = { version = "0.1.0", path = "../sim-lib-ledger-close" }
 sim-ledger-odb = { version = "0.1.0", path = "../sim-ledger-odb" }
 time = "0.3"
-sim-storage-port = { version = "0.1.0" }
+sim-storage-port = { version = "0.2.0" }
 
 [dev-dependencies]
 sim-ledger-test-support = { path = "../sim-ledger-test-support" }
