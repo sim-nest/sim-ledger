@@ -24,7 +24,7 @@ sim-relation-site = { version = "0.2.0" }
 sim-ledger-store-port = { path = "../sim-ledger-store-port" }
 sim-codec = { version = "0.3.0", optional = true }
 sim-kernel = { version = "0.4.0" }
-toml = "0.8"
+toml = "1.1"
 
 [dev-dependencies]
 sim-ledger-test-support = { path = "../sim-ledger-test-support" }
