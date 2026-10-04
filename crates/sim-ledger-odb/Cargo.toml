@@ -14,7 +14,7 @@ csv = "1"
 sim-codec-sql = "0.2.0"
 sim-ledger = { version = "0.1.0", path = "../sim-ledger" }
 time = "0.3"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true

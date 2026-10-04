@@ -20,7 +20,7 @@ sim-storage-port = { version = "0.2.0" }
 
 [dev-dependencies]
 sim-ledger-test-support = { path = "../sim-ledger-test-support" }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true
